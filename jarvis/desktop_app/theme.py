@@ -18,6 +18,40 @@ MONO_STACK = '"JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace'
 # Each theme defines the same keys so the stylesheet template stays shared.
 
 THEMES: dict[str, dict[str, str]] = {
+    # The first four mirror the Command Deck's themes one-for-one, so the native
+    # shell (sign-in, config panels) and the embedded deck share one look.
+    "obsidian": {
+        "label": "Obsidian Amber",
+        "bg": "#070a09", "panel": "#0f1412", "elevated": "#161c19",
+        "border": "#1e2622", "text": "#e9efeb", "muted": "#8e9c96",
+        "accent": "#e8b341", "accent_dim": "#9c7526", "accent_soft": "#1d1810",
+        "accent_hi": "#f3c55a", "danger": "#ff6b5a", "success": "#3fd9b0",
+        "on_accent": "#1a1205",
+    },
+    "aurora": {
+        "label": "Aurora Glass (violet)",
+        "bg": "#0b0b16", "panel": "#171728", "elevated": "#1f1f35",
+        "border": "#2c2c48", "text": "#f2f3fa", "muted": "#a6a8c4",
+        "accent": "#a78bfa", "accent_dim": "#6d4fd6", "accent_soft": "#1d1a34",
+        "accent_hi": "#c4b5fd", "danger": "#fb7185", "success": "#4ade9b",
+        "on_accent": "#0b0b16",
+    },
+    "carbon": {
+        "label": "Carbon Minimal (mono)",
+        "bg": "#0b0c0d", "panel": "#141518", "elevated": "#191a1e",
+        "border": "#24262b", "text": "#f4f5f6", "muted": "#9a9da3",
+        "accent": "#e6e8eb", "accent_dim": "#9aa0a6", "accent_soft": "#1b1d20",
+        "accent_hi": "#ffffff", "danger": "#ef6b6b", "success": "#5bc98c",
+        "on_accent": "#0d0e10",
+    },
+    "hud": {
+        "label": "Reactor HUD (cyan)",
+        "bg": "#00080c", "panel": "#00121a", "elevated": "#001c27",
+        "border": "#0b3d4a", "text": "#dff6fa", "muted": "#78a6b2",
+        "accent": "#00e5ff", "accent_dim": "#0090a8", "accent_soft": "#00222c",
+        "accent_hi": "#7df2ff", "danger": "#ff6b6b", "success": "#5bffc0",
+        "on_accent": "#001418",
+    },
     "arc": {
         "label": "Arc Reactor (cyan)",
         "bg": "#0b0f14", "panel": "#121821", "elevated": "#1a2230",
@@ -60,7 +94,7 @@ THEMES: dict[str, dict[str, str]] = {
     },
 }
 
-DEFAULT_THEME = "arc"
+DEFAULT_THEME = "obsidian"
 
 
 def theme_names() -> list[tuple[str, str]]:

@@ -33,7 +33,7 @@ class AppConfig:
     #: UI + assistant language: en | ru | uz.
     language: str = "en"
     #: Visual theme key (see jarvis.desktop_app.theme.THEMES).
-    theme: str = "arc"
+    theme: str = "obsidian"
 
     # -- desktop behaviour ----------------------------------------------------
     #: Hide to the system tray on close instead of quitting.
