@@ -48,6 +48,18 @@ class ChatOut(BaseModel):
     session_id: str
 
 
+class SpeakIn(BaseModel):
+    """A text-to-speech request."""
+
+    text: str
+    #: Optional language hint (e.g. "ru") passed to the TTS backend.
+    language: str | None = None
+
+
+#: Sentinel for the lazily-built voice service ("not resolved yet").
+_UNSET: object = object()
+
+
 def create_app(engine: JarvisEngine | None = None,
             settings: Settings | None = None):
     """Build the FastAPI application over an engine."""
@@ -55,8 +67,10 @@ def create_app(engine: JarvisEngine | None = None,
         from fastapi import (
             Depends,
             FastAPI,
+            File,
             Header,
             HTTPException,
+            UploadFile,
             WebSocket,
             WebSocketDisconnect,
         )
@@ -68,6 +82,8 @@ def create_app(engine: JarvisEngine | None = None,
 
     settings = settings or get_settings()
     engine = engine or JarvisEngine(settings)
+    #: Built on first voice request so the API starts fast without audio deps.
+    _voice_svc: object = _UNSET
 
     service: LicenseService | None = None
     if settings.auth_enabled:
@@ -142,6 +158,82 @@ def create_app(engine: JarvisEngine | None = None,
     @app.get("/models")
     async def models(_: str = Depends(require_principal)) -> dict:
         return {"models": engine.llm.list_profiles()}
+
+    # -- voice (real STT / TTS over the same engine's voice service) --------
+
+    def _voice():
+        """Lazily build the shared VoiceService, or None when voice is off."""
+        nonlocal _voice_svc
+        if _voice_svc is _UNSET:
+            if not settings.voice_enabled:
+                _voice_svc = None
+            else:
+                try:
+                    from jarvis.voice import VoiceService
+                    _voice_svc = VoiceService.from_settings(settings)
+                except Exception as exc:  # noqa: BLE001 - optional deps
+                    logger.warning("Voice service unavailable: %s", exc)
+                    _voice_svc = None
+        return _voice_svc
+
+    @app.get("/voice/status")
+    async def voice_status(_: str = Depends(require_principal)) -> dict:
+        """Whether speech-to-text / text-to-speech are actually usable."""
+        svc = _voice()
+        return {
+            "enabled": svc is not None,
+            "stt": bool(svc and svc.stt_available()),
+            "tts": bool(svc and svc.tts_available()),
+        }
+
+    # File uploads need python-multipart; FastAPI raises at *registration* time
+    # if it is missing, so only mount the upload route when it is importable.
+    try:
+        import python_multipart  # noqa: F401
+        _multipart = True
+    except ImportError:  # pragma: no cover - older releases use the old name
+        try:
+            import multipart  # noqa: F401
+            _multipart = True
+        except ImportError:
+            _multipart = False
+
+    if _multipart:
+        @app.post("/voice/stt")
+        async def voice_stt(file: UploadFile = File(...),  # noqa: B008 - FastAPI dep
+                            _: str = Depends(require_principal)) -> dict:
+            """Transcribe uploaded audio to text."""
+            svc = _voice()
+            if svc is None or not svc.stt_available():
+                raise HTTPException(503, "Speech-to-text is not configured.")
+            audio = await file.read()
+            if not audio:
+                raise HTTPException(400, "Empty audio upload.")
+            result = await svc.transcribe(audio, file.filename or "voice.webm")
+            return {"text": result.text,
+                    "language": getattr(result, "language", "")}
+    else:  # pragma: no cover - exercised only without python-multipart
+        @app.post("/voice/stt")
+        async def voice_stt_unavailable(_: str = Depends(require_principal)) -> dict:
+            raise HTTPException(
+                503, "Audio upload needs python-multipart: pip install python-multipart")
+
+    @app.post("/voice/tts")
+    async def voice_tts(body: SpeakIn,
+                        _: str = Depends(require_principal)):
+        """Synthesise speech for ``text`` and return the audio bytes."""
+        from fastapi.responses import Response
+
+        svc = _voice()
+        if svc is None or not svc.tts_available():
+            raise HTTPException(503, "Text-to-speech is not configured.")
+        if not body.text.strip():
+            raise HTTPException(400, "Nothing to speak.")
+        audio = await svc.synthesize(body.text, body.language)
+        ext = svc.tts_ext()
+        media = {"ogg": "audio/ogg", "mp3": "audio/mpeg",
+                "wav": "audio/wav"}.get(ext, "application/octet-stream")
+        return Response(content=audio, media_type=media)
 
     @app.post("/chat", response_model=ChatOut)
     async def chat(body: ChatIn,
@@ -275,6 +367,8 @@ def create_app(engine: JarvisEngine | None = None,
                 "profiles": engine.llm.list_profiles(),
                 "router": settings.ai_router_enabled,
                 "search": settings.search_provider if settings.search_enabled else "off"},
+            "voice": {"stt": bool(_voice() and _voice().stt_available()),
+                    "tts": bool(_voice() and _voice().tts_available())},
             "security": {"file_write": settings.allow_file_write,
                         "shell": settings.allow_shell,
                         "desktop": settings.allow_desktop_control,

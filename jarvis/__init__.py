@@ -15,7 +15,7 @@ Public entry points:
     get_settings   — cached, typed configuration.
 """
 
-__version__ = "1.9.4"
+__version__ = "1.9.5"
 __author__ = "nomadnairi"
 
 from jarvis.config.settings import get_settings

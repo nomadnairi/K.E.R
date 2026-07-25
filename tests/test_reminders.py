@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from jarvis.interfaces.bot_menu import screen_reminders, screen_settings
+from jarvis.interfaces.bot_menu import screen_reminders
 from jarvis.interfaces.reminders import (
     ReminderStore,
     is_reminder,

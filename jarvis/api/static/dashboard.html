@@ -4,6 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>KER — Command Deck</title>
+<!-- Inline icon: avoids a 404 favicon request in the embedded web view. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23E8B341' stroke-width='1.6'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Ccircle cx='12' cy='12' r='3.5'/%3E%3C/svg%3E" />
 <style>
   :root{
     --bg:#0A0F0D; --bg-2:#0C1311; --rail:#0D1513;
@@ -25,8 +27,37 @@
       radial-gradient(800px 460px at 40% 120%, rgba(63,217,176,.05), transparent 60%), var(--bg);
     color:var(--ink); font-family:var(--sans); line-height:1.5; overflow:hidden}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-  body.nomotion *{animation:none!important}
+  body.nomotion *{animation:none!important; transition:none!important}
   button{font-family:inherit}
+  /* ---- motion: screen transitions + tactile buttons ---- */
+  .view.enter{animation:viewIn .22s cubic-bezier(.22,.7,.3,1) both}
+  @keyframes viewIn{from{opacity:0;transform:translateY(8px) scale(.995)}to{opacity:1;transform:none}}
+  /* every clickable surface gets a spring-y press + hover lift */
+  button,.nav,.fcard,.hmrow,.mrow,.htab,.mcat,.item,.sw{
+    transition:transform .16s cubic-bezier(.22,.7,.3,1), background .18s ease,
+              border-color .18s ease, color .18s ease, box-shadow .2s ease;
+    will-change:transform}
+  button:active,.fcard:active,.hmrow:active,.htab:active,.nav:active{transform:scale(.96)}
+  .fcard:active{transform:scale(.97) translateY(-1px)}
+  /* ripple: a light pulse from the click point (JS sets --rx/--ry) */
+  .rippling{position:relative; overflow:hidden}
+  .rippling::after{content:""; position:absolute; left:var(--rx,50%); top:var(--ry,50%);
+    width:8px; height:8px; margin:-4px 0 0 -4px; border-radius:50%;
+    background:radial-gradient(circle, rgba(255,255,255,.5), transparent 70%);
+    animation:ripple .5s ease-out forwards; pointer-events:none}
+  @keyframes ripple{to{transform:scale(26);opacity:0}}
+  /* staggered entrance for card grids — feels alive without being slow */
+  .fgrid .fcard{animation:popIn .3s cubic-bezier(.22,.7,.3,1) both}
+  .fgrid .fcard:nth-child(2){animation-delay:.03s}.fgrid .fcard:nth-child(3){animation-delay:.06s}
+  .fgrid .fcard:nth-child(4){animation-delay:.09s}.fgrid .fcard:nth-child(5){animation-delay:.12s}
+  .fgrid .fcard:nth-child(6){animation-delay:.15s}.fgrid .fcard:nth-child(7){animation-delay:.18s}
+  .fgrid .fcard:nth-child(8){animation-delay:.21s}
+  @keyframes popIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .hmsg{animation:msgIn .24s cubic-bezier(.22,.7,.3,1) both}
+  @keyframes msgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  /* mic button while recording */
+  .hmic.rec{color:#ff6b6b;border-color:#ff6b6b;animation:recPulse 1.1s ease-in-out infinite}
+  @keyframes recPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,107,107,.35)}50%{box-shadow:0 0 0 7px rgba(255,107,107,0)}}
   :focus-visible{outline:2px solid var(--accent); outline-offset:2px}
   code{font-family:var(--mono); color:var(--accent)}
 
@@ -124,10 +155,16 @@
   .chip .ck{color:var(--dim); font:600 10px/1 var(--sans); text-transform:uppercase; letter-spacing:.06em; margin-bottom:5px}
   .chip .cv{font:600 13px/1.2 var(--mono); color:var(--fg); word-break:break-word}
   .chip .cv.ok{color:var(--good)}
-  .info .inforow{display:flex; align-items:center; gap:14px}
-  .reactor.mini{width:64px; height:64px; flex:none}
-  .infometa .infoname{font:800 20px/1 var(--sans); letter-spacing:.28em; text-transform:uppercase}
-  .infometa .infotag{color:var(--dim); font-size:11px; margin-top:6px}
+  /* the 3D core is the visual centrepiece of the left column */
+  .corehero{display:flex; flex-direction:column; align-items:center; gap:10px; padding:6px 0 2px}
+  .reactor.hero{width:min(190px,26vh); height:min(190px,26vh); flex:none}
+  .corehero .infoname{font:800 21px/1 var(--sans); letter-spacing:.3em; text-transform:uppercase; margin-top:4px}
+  .corehero .infotag{color:var(--dim); font-size:11px}
+  .corehero .caps{display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:6px}
+  .corehero .status{margin-top:8px}
+  .syschips{grid-template-columns:1fr 1fr}
+  .fgcard .fcard small{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
+  .hcol{overflow:auto; scrollbar-width:thin}   /* nothing gets clipped on short screens */
   .infogrid{display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; margin-top:4px}
   .infogrid>div{display:flex; justify-content:space-between; font:600 12px/1 var(--mono); border-bottom:1px solid var(--line); padding:7px 0}
   .infogrid span{color:var(--dim)} .infogrid b{color:var(--fg)}
@@ -153,6 +190,8 @@
   .hcomposer input{flex:1; background:rgba(255,255,255,.02); border:1px solid var(--line); border-radius:11px; padding:11px 13px; color:var(--fg); font:400 13px var(--sans)}
   .hcomposer input:focus{outline:none; border-color:var(--accent)}
   .hcomposer button{width:42px; border-radius:11px; border:none; background:var(--accent); color:#1a1205; cursor:pointer; display:grid; place-items:center}
+  .hcomposer .hmic{background:transparent; border:1px solid var(--line); color:var(--muted)}
+  .hcomposer .hmic:hover{color:var(--accent); border-color:var(--accent)}
   @media (max-width:1100px){.home3{grid-template-columns:1fr; overflow:auto}}
   .dockbtn.primary{background:linear-gradient(180deg,rgba(232,179,65,.16),rgba(232,179,65,.05)); color:var(--accent)}
 
@@ -319,40 +358,39 @@
     <!-- HOME (3-column command deck) -->
     <section class="view" id="view-home">
       <div class="home3">
-        <!-- Column 1 -->
+        <!-- Column 1: the 3D core leads, then quick actions, then telemetry -->
         <div class="hcol">
+          <div class="hcard info">
+            <div class="corehero">
+              <div class="reactor hero"><canvas id="rx" class="rxcanvas"></canvas><div class="ring r1 spin"></div><div class="ring r2 spin rev"></div><div class="ring r3"></div><div class="ticks"></div><div class="hub"><div class="viz"><i></i><i></i><i></i><i></i><i></i></div></div></div>
+              <div class="infoname" id="coreName">KER</div>
+              <div class="status" id="status"><span style="width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block"></span> —</div>
+              <div class="caps" id="caps"></div>
+            </div>
+          </div>
           <div class="hcard fgcard">
             <div class="fgrid">
               <button class="fcard" onclick="go('chat')"><span class="fi">💬</span><b>Чат</b><small>Общение с AI</small></button>
-              <button class="fcard" onclick="go('models')"><span class="fi">🧠</span><b>AI</b><small>Модели и провайдеры</small></button>
-              <button class="fcard" onclick="go('memory')"><span class="fi">🧩</span><b>Память</b><small>Управление памятью</small></button>
-              <button class="fcard" onclick="go('internet')"><span class="fi">🌍</span><b>Интернет</b><small>Поиск в сети</small></button>
+              <button class="fcard" onclick="go('models')"><span class="fi">🧠</span><b>AI</b><small>Модели</small></button>
+              <button class="fcard" onclick="go('memory')"><span class="fi">🧩</span><b>Память</b><small>Знания</small></button>
+              <button class="fcard" onclick="go('internet')"><span class="fi">🌍</span><b>Интернет</b><small>Поиск</small></button>
               <button class="fcard" onclick="go('mcp')"><span class="fi">🛠</span><b>MCP</b><small>Инструменты</small></button>
               <button class="fcard" onclick="go('settings')"><span class="fi">⚙️</span><b>Настройки</b><small>Система</small></button>
-              <button class="fcard" onclick="go('profile')"><span class="fi">👤</span><b>Профиль</b><small>Ваш профиль</small></button>
-              <button class="fcard" onclick="go('about')"><span class="fi">ℹ️</span><b>Информация</b><small>О системе</small></button>
             </div>
           </div>
           <div class="hcard">
-            <div class="hh">Система <span class="dot" id="status"><span style="width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block"></span> —</span></div>
+            <div class="hh">Система</div>
             <div class="syschips">
               <div class="chip"><div class="ck">Провайдер</div><div class="cv" id="sysProv">—</div></div>
               <div class="chip"><div class="ck">Модель</div><div class="cv" id="sysModel">—</div></div>
               <div class="chip"><div class="ck">Память</div><div class="cv" id="sysMem">—</div></div>
               <div class="chip"><div class="ck">Интернет</div><div class="cv" id="sysNet">—</div></div>
               <div class="chip"><div class="ck">API</div><div class="cv" id="sysApi">—</div></div>
-            </div>
-          </div>
-          <div class="hcard info">
-            <div class="inforow">
-              <div class="reactor mini"><canvas id="rx" class="rxcanvas"></canvas><div class="ring r1 spin"></div><div class="ring r2 spin rev"></div><div class="hub"></div></div>
-              <div class="infometa"><div class="infoname" id="coreName">KER</div><div class="infotag">Personal AI Assistant · v<span id="homeVer">1.9.4</span></div></div>
-            </div>
-            <div class="infogrid">
-              <div><span>Python</span><b id="ifPy">—</b></div>
-              <div><span>Uptime</span><b id="ifUp">—</b></div>
-              <div><span>Сессии</span><b id="ifSess">—</b></div>
-              <div><span>Режим</span><b id="ifMode">—</b></div>
+              <div class="chip"><div class="ck">Python</div><div class="cv" id="ifPy">—</div></div>
+              <div class="chip"><div class="ck">Uptime</div><div class="cv" id="ifUp">—</div></div>
+              <div class="chip"><div class="ck">Сессии</div><div class="cv" id="ifSess">—</div></div>
+              <div class="chip"><div class="ck">Режим</div><div class="cv" id="ifMode">—</div></div>
+              <div class="chip"><div class="ck">Версия</div><div class="cv">v<span id="homeVer">1.9.5</span></div></div>
             </div>
           </div>
         </div>
@@ -369,9 +407,9 @@
         <!-- Column 3: live chat -->
         <div class="hcol">
           <div class="hcard grow chatcard">
-            <div class="hh">Чат с <span id="homeName">KER</span></div>
+            <div class="hh"><span>Чат с <span id="homeName">KER</span></span></div>
             <div class="hstream" id="hstream"></div>
-            <div class="hcomposer"><input id="hq" placeholder="Введите сообщение…" onkeydown="if(event.key==='Enter')hSend()"><button onclick="hSend()" aria-label="Отправить"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg></button></div>
+            <div class="hcomposer"><input id="hq" placeholder="Введите сообщение…" onkeydown="if(event.key==='Enter')hSend()"><button class="hmic" id="hmic" onclick="hMic()" aria-label="Голосовой ввод" title="Голосовой ввод"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4"/></svg></button><button onclick="hSend()" aria-label="Отправить"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg></button></div>
           </div>
         </div>
       </div>
@@ -436,13 +474,13 @@
       <div class="card" style="max-width:520px"><div class="body" style="text-align:center; padding:32px">
         <div style="font-size:40px">🛡</div><div id="aboutName" style="font-weight:800; letter-spacing:.4em; font-size:22px; margin-top:12px">KER</div>
         <div style="color:var(--dim); font-size:13px; margin-top:6px">Personal AI Assistant</div>
-        <div style="color:var(--muted); font-family:var(--mono); margin-top:14px">Версия 1.9.4</div>
+        <div style="color:var(--muted); font-family:var(--mono); margin-top:14px">Версия 1.9.5</div>
         <div style="color:var(--dim); font-size:12px; margin-top:18px">Провайдер-независимый ассистент · MCP · тарифы · Telegram · десктоп</div>
       </div></div>
     </section>
   </div>
 
-  <div class="statusbar"><span><b id="sbName">KER</b> <b>1.9.4</b></span><span>Python <b id="sbPy">—</b></span><span>API <b id="sbApi">—</b></span><span>CPU <b id="sbCpu">—</b></span><span>Память <b id="sbMem">—</b></span><span>Сессии <b id="sbSess">—</b></span><span class="sp" id="sbClock">--:--:--</span></div>
+  <div class="statusbar"><span><b id="sbName">KER</b> <b>1.9.5</b></span><span>Python <b id="sbPy">—</b></span><span>API <b id="sbApi">—</b></span><span>CPU <b id="sbCpu">—</b></span><span>Память <b id="sbMem">—</b></span><span>Сессии <b id="sbSess">—</b></span><span class="sp" id="sbClock">--:--:--</span></div>
 </div>
 
 <script>
@@ -452,7 +490,11 @@
   const $ = id => document.getElementById(id);
   const TITLE={home:"Главная",chat:"Чат",models:"Модели",memory:"Память",internet:"Интернет",mcp:"MCP серверы",settings:"Настройки",profile:"Профиль",about:"О системе"};
   const SUB={home:"Добро пожаловать, сэр",chat:"Диалог с ассистентом",models:"Каталог моделей",memory:"Управление памятью",internet:"Веб-поиск",mcp:"Внешние инструменты (MCP)",settings:"Персонализация",profile:"Ваш профиль",about:"О системе"};
-  function go(v){document.querySelectorAll(".view").forEach(x=>x.hidden=x.id!=="view-"+v);
+  function go(v){
+    document.querySelectorAll(".view").forEach(x=>{
+      const on=x.id==="view-"+v; x.hidden=!on;
+      if(on){x.classList.remove("enter");void x.offsetWidth;x.classList.add("enter");}
+    });
     document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
     $("vTitle").textContent=TITLE[v]; $("vSub").textContent=SUB[v];
     if(v==="models") loadModels(); if(v==="settings") renderSettings(); if(v==="chat") loadSessions();}
@@ -575,11 +617,89 @@
     const tag=t=>t==="free"?'<span class="tag free">Бесплатная</span>':t==="prem"?'<span class="tag">Premium</span>':'';
     listEl.innerHTML=rows.length?rows.slice(0,12).map(([ic,nm,pv,st,tags])=>`<div class="hmrow" onclick="go('models')"><div class="ic">${ic}</div><div><div class="nm">${nm}</div><div class="pv">${pv} ${(tags||[]).map(tag).join(" ")}</div></div><div class="st">★ ${st}</div></div>`).join(""):`<div style="color:var(--dim);padding:14px;font-size:13px">${CATALOG?"Ничего не найдено":"Каталог загрузится при подключении к движку"}</div>`;
   }
+  // Tactile ripple on every click — cheap (pure CSS, one class) and universal.
+  document.addEventListener("pointerdown",e=>{
+    if(document.body.classList.contains("nomotion"))return;
+    const el=e.target.closest("button,.fcard,.hmrow,.nav,.htab");
+    if(!el)return;
+    const r=el.getBoundingClientRect();
+    el.style.setProperty("--rx",(e.clientX-r.left)+"px");
+    el.style.setProperty("--ry",(e.clientY-r.top)+"px");
+    el.classList.remove("rippling");void el.offsetWidth;el.classList.add("rippling");
+    setTimeout(()=>el.classList.remove("rippling"),520);
+  },{passive:true});
+
   function hAdd(t,who){const el=document.createElement("div");el.className="hmsg "+(who==="u"?"u":"a");el.textContent=t;const s=$("hstream");if(!s)return el;s.appendChild(el);s.scrollTop=s.scrollHeight;return el;}
+
+  // ---- real voice: record → /voice/stt → chat → /voice/tts playback ------
+  let REC=null, RECCHUNKS=[], VOICE={stt:false,tts:false};
+  async function refreshVoice(){
+    if(!CFG.api){VOICE={stt:false,tts:false};return;}
+    try{const r=await fetch(CFG.api+"/voice/status",{headers:authH()});if(r.ok)VOICE=await r.json();}catch(e){}
+    const b=$("hmic"); if(b){b.title=VOICE.stt?"Голосовой ввод":"Голосовой ввод недоступен (нет STT)";
+      b.style.opacity=VOICE.stt?"1":".45";}
+  }
+  async function hMic(){
+    const btn=$("hmic");
+    if(REC&&REC.state==="recording"){REC.stop();return;}          // second tap = stop
+    if(!CFG.api){hAdd("Подключите движок, чтобы использовать голос.","a");return;}
+    if(!VOICE.stt){hAdd("Распознавание речи не настроено (нужен ключ STT).","a");return;}
+    if(!navigator.mediaDevices||!window.MediaRecorder){hAdd("Браузер не поддерживает запись звука.","a");return;}
+    let stream;
+    try{stream=await navigator.mediaDevices.getUserMedia({audio:true});}
+    catch(e){hAdd("Нет доступа к микрофону.","a");return;}
+    RECCHUNKS=[];
+    try{REC=new MediaRecorder(stream);}catch(e){hAdd("Запись недоступна в этой сборке.","a");return;}
+    REC.ondataavailable=e=>{if(e.data&&e.data.size)RECCHUNKS.push(e.data);};
+    REC.onstop=async()=>{
+      stream.getTracks().forEach(t=>t.stop());
+      btn&&btn.classList.remove("rec");
+      const blob=new Blob(RECCHUNKS,{type:REC.mimeType||"audio/webm"});
+      if(!blob.size){hAdd("Ничего не записалось.","a");return;}
+      const th=hAdd("🎙 Распознаю…","a");
+      try{
+        const fd=new FormData(); fd.append("file",blob,"voice.webm");
+        const r=await fetch(CFG.api+"/voice/stt",{method:"POST",headers:authH(),body:fd});
+        if(!r.ok)throw new Error(await r.text());
+        const text=(await r.json()).text||"";
+        th.remove();
+        if(!text.trim()){hAdd("Речь не распознана.","a");return;}
+        const inp=$("hq"); if(inp){inp.value=text; await hSend();}     // send it for real
+        if(VOICE.tts)speakLast();
+      }catch(e){th.textContent="Не удалось распознать речь.";}
+    };
+    REC.start(); btn&&btn.classList.add("rec");
+    setTimeout(()=>{if(REC&&REC.state==="recording")REC.stop();},30000);  // safety cap
+  }
+  async function speakLast(){
+    const msgs=document.querySelectorAll("#hstream .hmsg.a");
+    const last=msgs[msgs.length-1]; if(!last||!VOICE.tts)return;
+    try{
+      const r=await fetch(CFG.api+"/voice/tts",{method:"POST",
+        headers:{"Content-Type":"application/json",...authH()},
+        body:JSON.stringify({text:last.textContent.slice(0,600)})});
+      if(!r.ok)return;
+      const a=new Audio(URL.createObjectURL(await r.blob())); a.play().catch(()=>{});
+    }catch(e){}
+  }
   async function hSend(){const i=$("hq");if(!i)return;const q=(i.value||"").trim();if(!q)return;i.value="";hAdd(q,"u");const th=hAdd("…","a");
     if(!CFG.api){th.textContent="Подключите движок (Продолжить локально), сэр.";return;}
-    try{const r=await fetch(CFG.api+"/chat",{method:"POST",headers:{"Content-Type":"application/json",...authH()},body:JSON.stringify({message:q,session_id:"dashboard-home"})});const j=await r.json();th.textContent=(j.reply||"—");}
+    try{const r=await fetch(CFG.api+"/chat",{method:"POST",headers:{"Content-Type":"application/json",...authH()},body:JSON.stringify({message:q,session_id:"dashboard-home"})});const j=await r.json();th.textContent=humanError(j.reply||"—");}
     catch(e){th.textContent="Сбой соединения, сэр.";}}
+  // Turn raw provider failures into something a customer can act on.
+  function humanError(text){
+    const t=String(text);
+    if(!/problem|failed|error code|unconfigured/i.test(t)) return t;
+    if(/401|invalid x-api-key|authentication/i.test(t))
+      return "⚠️ Ключ AI-провайдера отклонён. Проверьте API-ключ в Настройках → AI.";
+    if(/429|rate limit|quota|insufficient/i.test(t))
+      return "⚠️ Лимит провайдера исчерпан. Попробуйте позже или смените модель.";
+    if(/unconfigured|no llm|providers failed/i.test(t))
+      return "⚠️ AI-провайдер не настроен. Добавьте API-ключ в Настройках → AI (или выберите локальную модель).";
+    if(/timeout|timed out/i.test(t))
+      return "⚠️ Провайдер не ответил вовремя. Попробуйте ещё раз.";
+    return "⚠️ Не удалось получить ответ. Проверьте настройки AI и соединение.";
+  }
 
   // ---- chat + history ----  (loaded live; no fabricated conversations)
   const HIST_EMPTY=[["История",[]]];
@@ -637,7 +757,7 @@
     <div class="set-row"><div class="d">Меняется в <code>.env</code> сервера. Здесь показано реальное состояние.</div></div>
   </div></div>`;};
   P.updates=()=>`<div class="card"><header><h3>Обновления</h3></header><div class="body">
-    <div class="set-row"><div><div class="t">Текущая версия</div><div class="d">Установленная сборка</div></div><code id="updCur">1.9.4</code></div>
+    <div class="set-row"><div><div class="t">Текущая версия</div><div class="d">Установленная сборка</div></div><code id="updCur">1.9.5</code></div>
     <div class="set-row"><div><div class="t">Последняя версия</div><div class="d" id="updChan">Канал: ранний доступ</div></div><span id="updLatest" class="tag">—</span></div>
     <div class="set-row"><div><div class="t">Автообновление</div><div class="d" id="updAutoHint">Обновляться сразу, как выходит релиз</div></div>
       <button class="toggle" id="updAutoTog" aria-pressed="false" onclick="toggleAuto(this)"></button></div>
@@ -705,7 +825,7 @@
   }
   function renderUpd(){
     const u=UPD||{};const box=$("updBox");
-    $("updCur").textContent=u.current||"1.9.4";
+    $("updCur").textContent=u.current||"1.9.5";
     $("updLatest").textContent=u.latest||"—";
     $("updLatest").className="tag "+(u.available?"pop":"");
     $("updChan").textContent="Канал: "+({early:"ранний доступ",stable:"стабильные",off:"выключено"}[u.channel_mode]||u.channel_mode||"—");
@@ -738,13 +858,19 @@
     const den=localStorage.getItem("jarvis.den");if(den)document.documentElement.dataset.density=den;
     if(localStorage.getItem("jarvis.motion")==="off")document.body.classList.add("nomotion");})();
 
+  // Probe real voice availability once everything is declared.
+  refreshVoice();
+
   // ---- real WebGL 3D reactor (graceful: falls back to the CSS reactor) ----
   (function reactor3D(){
     const cv=document.getElementById("rx"); if(!cv||!window.WebGLRenderingContext) return;
     let gl; try{gl=cv.getContext("webgl",{alpha:true,premultipliedAlpha:false,antialias:true});}catch(e){}
     if(!gl) return;
     const dpr=Math.min(window.devicePixelRatio||1,2);
-    function size(){const r=cv.getBoundingClientRect();cv.width=Math.max(2,r.width*dpr|0);cv.height=Math.max(2,r.height*dpr|0);gl.viewport(0,0,cv.width,cv.height);}
+    let scale=1;   // render-resolution multiplier, tuned by the governor below
+    function size(){const r=cv.getBoundingClientRect();const k=dpr*scale;
+      cv.width=Math.max(2,r.width*k|0);cv.height=Math.max(2,r.height*k|0);
+      gl.viewport(0,0,cv.width,cv.height);}
     const vs="attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
     const fs="precision highp float;uniform vec2 R;uniform float T;uniform vec3 AC;"
       +"mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}"
@@ -769,12 +895,42 @@
     function accent(){const c=getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
       const m=/#([0-9a-f]{6})/i.exec(c);if(!m)return[0.91,0.70,0.25];const n=parseInt(m[1],16);
       return[(n>>16&255)/255,(n>>8&255)/255,(n&255)/255];}
+    // ---- performance governor (keeps weak laptops smooth) ----------------
+    // Start conservative, measure real frame cost, then scale resolution and
+    // frame rate to fit the machine. Never render when nobody can see it.
+    const cores=navigator.hardwareConcurrency||2;
+    const lowEnd=cores<=4||(navigator.deviceMemory||4)<=4;
+    scale=lowEnd?0.6:1;
+    let fpsCap=lowEnd?24:40;         // frames per second ceiling
     size();window.addEventListener("resize",size);cv.classList.add("on");
+    let slow=0, fast=0, last=0;
     const t0=performance.now();
-    function frame(){const reduce=document.body.classList.contains("nomotion");
-      const t=reduce?0.6:(performance.now()-t0)/1000;
+    const visible=()=>{
+      if(document.hidden) return false;                       // tab/window hidden
+      const home=$("view-home");
+      if(home&&home.hidden) return false;                     // another screen open
+      const r=cv.getBoundingClientRect();
+      return r.width>0&&r.bottom>0&&r.top<innerHeight;        // actually on screen
+    };
+    function frame(now){
+      requestAnimationFrame(frame);
+      if(!visible()){last=0;return;}                          // idle: zero GPU work
+      const minGap=1000/fpsCap;
+      if(last&&now-last<minGap) return;                       // honour the fps cap
+      const dt=last?now-last:minGap; last=now;
+      // Adaptive quality: sustained slow frames → smaller buffer, fewer fps.
+      if(dt>minGap*2.2){ if(++slow>18){slow=0;
+          if(scale>0.45){scale=Math.max(0.45,scale-0.18);size();}
+          else if(fpsCap>15){fpsCap=15;}
+          else {cv.classList.remove("on");return;}            // give up: CSS reactor
+        } } else if(dt<minGap*1.25&&++fast>240&&scale<1&&!lowEnd){fast=0;scale=Math.min(1,scale+0.2);size();}
+      const reduce=document.body.classList.contains("nomotion")
+        ||matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const t=reduce?0.6:(now-t0)/1000;                       // frozen pose if reduced
       gl.uniform2f(uR,cv.width,cv.height);gl.uniform1f(uT,t);gl.uniform3fv(uAC,accent());
-      gl.drawArrays(gl.TRIANGLES,0,3);requestAnimationFrame(frame);}
+      gl.drawArrays(gl.TRIANGLES,0,3);
+    }
+    document.addEventListener("visibilitychange",()=>{last=0;});
     requestAnimationFrame(frame);
   })();
 </script>

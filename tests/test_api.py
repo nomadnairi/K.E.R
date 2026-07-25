@@ -174,3 +174,97 @@ def test_websocket_rejects_bad_key():
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect("/ws/s1") as ws:
                 ws.receive_text()
+
+
+# -- voice endpoints ---------------------------------------------------------
+
+
+class _FakeSTT:
+    async def transcribe(self, audio: bytes, filename: str = "v.ogg"):
+        from jarvis.voice.base import Transcription
+        return Transcription(text=f"heard {len(audio)} bytes", language="ru")
+
+
+class _FakeVoice:
+    """Minimal stand-in with the same contract as the real VoiceService."""
+
+    def __init__(self, stt: bool = True, tts: bool = True) -> None:
+        self._stt, self._tts = stt, tts
+
+    def stt_available(self) -> bool:
+        return self._stt
+
+    def tts_available(self) -> bool:
+        return self._tts
+
+    async def transcribe(self, audio: bytes, filename: str = "v.ogg"):
+        from jarvis.voice.base import Transcription
+        return Transcription(text=f"heard {len(audio)} bytes", language="ru")
+
+    async def synthesize(self, text: str, language=None) -> bytes:
+        return b"OggS-fake-audio"
+
+    def tts_ext(self) -> str:
+        return "ogg"
+
+
+def _voice_app(monkeypatch, voice=None):
+    """Build an app whose voice service is the injected fake."""
+    from jarvis.voice import VoiceService
+    monkeypatch.setattr(VoiceService, "from_settings",
+                        classmethod(lambda cls, s: voice), raising=True)
+    settings = Settings(anthropic_api_key="k", log_file="", memory_enabled=False,
+                        integrations_enabled=False, goals_enabled=False,
+                        rate_limit_enabled=False, api_key="", voice_enabled=True)
+    engine = JarvisEngine(container=ServiceContainer(
+        settings, llm_client=LLMClient(primary=FakeProvider())))
+    return create_app(engine=engine, settings=settings)
+
+
+def test_voice_status_reports_real_availability(monkeypatch):
+    with TestClient(_voice_app(monkeypatch, _FakeVoice(stt=True, tts=False))) as c:
+        body = c.get("/voice/status").json()
+        assert body == {"enabled": True, "stt": True, "tts": False}
+
+
+def test_voice_stt_transcribes_upload(monkeypatch):
+    pytest.importorskip("multipart")
+    with TestClient(_voice_app(monkeypatch, _FakeVoice())) as c:
+        r = c.post("/voice/stt",
+                   files={"file": ("v.webm", b"1234567890", "audio/webm")})
+        assert r.status_code == 200
+        assert r.json() == {"text": "heard 10 bytes", "language": "ru"}
+
+
+def test_voice_stt_rejects_empty_upload(monkeypatch):
+    pytest.importorskip("multipart")
+    with TestClient(_voice_app(monkeypatch, _FakeVoice())) as c:
+        r = c.post("/voice/stt", files={"file": ("v.webm", b"", "audio/webm")})
+        assert r.status_code == 400
+
+
+def test_voice_tts_returns_audio(monkeypatch):
+    with TestClient(_voice_app(monkeypatch, _FakeVoice())) as c:
+        r = c.post("/voice/tts", json={"text": "привет", "language": "ru"})
+        assert r.status_code == 200
+        assert r.content == b"OggS-fake-audio"
+        assert r.headers["content-type"].startswith("audio/ogg")
+
+
+def test_voice_endpoints_503_when_unconfigured(monkeypatch):
+    """No usable backend must fail loudly, never silently fake a result."""
+    with TestClient(_voice_app(monkeypatch, _FakeVoice(stt=False, tts=False))) as c:
+        assert c.post("/voice/tts", json={"text": "hi"}).status_code == 503
+        if pytest.importorskip("multipart", reason="needs python-multipart"):
+            assert c.post("/voice/stt",
+                          files={"file": ("v.webm", b"x", "audio/webm")}
+                          ).status_code == 503
+
+
+def test_state_exposes_voice_and_real_python(monkeypatch):
+    import platform
+    with TestClient(_voice_app(monkeypatch, _FakeVoice())) as c:
+        s = c.get("/dashboard/state").json()
+        assert s["voice"] == {"stt": True, "tts": True}
+        assert s["python"] == platform.python_version()   # real, not hardcoded
+        assert "session" in s and isinstance(s["session"], int)

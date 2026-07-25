@@ -37,8 +37,13 @@ def test_perplexity_requires_key():
 
 
 def test_playwright_available_only_when_installed():
-    # Playwright isn't installed in CI, so it must report unavailable.
-    assert PlaywrightProvider().available() is False
+    """Readiness must track the real import, in either direction."""
+    try:
+        import playwright  # noqa: F401
+        installed = True
+    except ImportError:
+        installed = False
+    assert PlaywrightProvider().available() is installed
 
 
 def test_playwright_parse_pure():
@@ -57,7 +62,11 @@ def test_manager_includes_perplexity_and_playwright():
     assert "perplexity" in provs and "playwright" in provs
     # DuckDuckGo still the keyless fallback; tavily still first.
     assert provs[0] == "tavily"
-    assert mgr.available() == ["duckduckgo"]   # playwright not installed
+    # Keyless backends only: DuckDuckGo, plus the browser if Playwright is there.
+    expected = ["duckduckgo"]
+    if PlaywrightProvider().available():
+        expected.append("playwright")
+    assert mgr.available() == expected
 
 
 # -- web search tool ----------------------------------------------------------

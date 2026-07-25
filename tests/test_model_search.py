@@ -5,7 +5,7 @@ from __future__ import annotations
 from jarvis.config.settings import Settings
 from jarvis.interfaces.bot_menu import screen_search
 from jarvis.interfaces.chat_api import detect_key_provider, parse_api_command
-from jarvis.interfaces.model_search import FoundModel, normalize, search
+from jarvis.interfaces.model_search import normalize, search
 
 
 def _flat(rows):
