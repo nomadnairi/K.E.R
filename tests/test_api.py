@@ -268,3 +268,33 @@ def test_state_exposes_voice_and_real_python(monkeypatch):
         assert s["voice"] == {"stt": True, "tts": True}
         assert s["python"] == platform.python_version()   # real, not hardcoded
         assert "session" in s and isinstance(s["session"], int)
+
+
+def test_the_interface_is_allowed_to_call_the_api():
+    """A page always sits on another origin; without this it gets nothing.
+
+    The desktop window and a locally run dashboard both call the API
+    cross-origin, so a missing CORS header shows up as an interface full of
+    dashes over a perfectly healthy engine.
+    """
+    with TestClient(_app()) as c:
+        r = c.get("/health", headers={"Origin": "ker://deck"})
+        assert r.status_code == 200
+        assert r.headers.get("access-control-allow-origin") == "*"
+
+
+def test_cors_can_be_narrowed_to_named_origins():
+    settings = Settings(
+        anthropic_api_key="k", log_file="", memory_enabled=False,
+        integrations_enabled=False, goals_enabled=False,
+        rate_limit_enabled=False,
+        api_cors_origins="https://deck.example",
+    )
+    engine = JarvisEngine(container=ServiceContainer(
+        settings, llm_client=LLMClient(primary=FakeProvider())))
+    with TestClient(create_app(engine=engine, settings=settings)) as c:
+        allowed = c.get("/health", headers={"Origin": "https://deck.example"})
+        assert allowed.headers.get("access-control-allow-origin") == \
+            "https://deck.example"
+        blocked = c.get("/health", headers={"Origin": "https://evil.example"})
+        assert "access-control-allow-origin" not in blocked.headers

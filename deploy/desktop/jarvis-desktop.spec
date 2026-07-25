@@ -9,9 +9,10 @@
 # cross-compile — each target is built on a matching runner
 # (.github/workflows/desktop-build.yml).
 #
-# The one-file binary bundles Python, Qt (PySide6) and the whole engine —
-# expect roughly 100-180 MB. User settings live outside the binary
-# (%APPDATA%\JARVIS or ~/.config/jarvis), so it stays portable.
+# The one-file binary bundles Python, Qt (PySide6, including WebEngine — the
+# app's interface is a page), and the whole engine, so expect roughly
+# 300-400 MB. User settings live outside the binary (%APPDATA%\JARVIS or
+# ~/.config/jarvis), so it stays portable.
 
 import os
 from pathlib import Path
@@ -22,16 +23,23 @@ a = Analysis(
     ["../../jarvis/desktop_app/__main__.py"],
     pathex=[str(Path(SPECPATH).resolve().parents[1])],
     binaries=[],
-    # Ship the desktop interface (what the app renders) plus the browser
-    # dashboard, which the bundled local API can still serve at /app.
+    # Ship the interface: the deck the app renders, its sign-in screen, and the
+    # browser dashboard, which the bundled local API still serves at /app.
     datas=[
         ("../../jarvis/api/static/desktop.html", "jarvis/api/static"),
+        ("../../jarvis/api/static/desktop_login.html", "jarvis/api/static"),
         ("../../jarvis/api/static/dashboard.html", "jarvis/api/static"),
     ],
     hiddenimports=[
         "jarvis.desktop_app.app",
         "jarvis.desktop_app.engine_thread",
+        "jarvis.desktop_app.webbridge",
+        "jarvis.desktop_app.bridge",
+        "jarvis.desktop_app.assets",
         "jarvis.integrations.telegram_channel",
+        # The interface is a page, so the web view must be in the bundle.
+        "PySide6.QtWebEngineCore",
+        "PySide6.QtWebEngineWidgets",
         # The bundled local API (Command Deck) — uvicorn's dynamic imports.
         "uvicorn.loops.auto", "uvicorn.loops.asyncio",
         "uvicorn.protocols.http.auto", "uvicorn.protocols.http.h11_impl",
@@ -42,19 +50,18 @@ a = Analysis(
     hookspath=[],
     runtime_hooks=[],
     # Drop modules we never import — smaller binary and lower memory at import
-    # time. Heavy optional Qt modules (WebEngine, Quick/QML, 3D, Charts,
-    # PDF, …) are not used by the app, only QtWidgets/Gui/Core/Multimedia.
+    # time. WebEngine and the Quick/QML stack it is built on are NOT excluded:
+    # the app's whole interface is a page, and without them the built exe falls
+    # back to plain widgets, which is exactly the bug this list once caused.
     excludes=[
         "tests", "tkinter", "PyQt5", "PySide2", "matplotlib", "IPython",
         "pytest", "pandas",
-        "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
-        "PySide6.QtWebEngineQuick", "PySide6.QtWebChannel",
-        "PySide6.QtQuick", "PySide6.QtQuick3D", "PySide6.QtQml",
-        "PySide6.Qt3DCore", "PySide6.Qt3DRender", "PySide6.QtCharts",
-        "PySide6.QtDataVisualization", "PySide6.QtPdf", "PySide6.QtPdfWidgets",
+        "PySide6.QtQuick3D", "PySide6.Qt3DCore", "PySide6.Qt3DRender",
+        "PySide6.QtCharts", "PySide6.QtDataVisualization",
+        "PySide6.QtPdf", "PySide6.QtPdfWidgets",
         "PySide6.QtDesigner", "PySide6.QtTest", "PySide6.QtSql",
         "PySide6.QtBluetooth", "PySide6.QtNfc", "PySide6.QtSensors",
-        "PySide6.QtSerialPort", "PySide6.QtWebSockets",
+        "PySide6.QtSerialPort",
     ],
 )
 

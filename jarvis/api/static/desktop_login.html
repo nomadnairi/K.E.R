@@ -1,0 +1,286 @@
+<!doctype html>
+<!--
+  KER Desktop — the way in.
+
+  Belongs to the desktop app: it is served at ker://deck/login and talks to the
+  app through the same bridge as the deck, so every button here does real work
+  (start the local engine, sign in to a server, redeem a bot login code).
+  Text arrives from the app as __STRINGS__ so the screen speaks the user's
+  language, and the palette is picked by data-tv, matching the deck.
+-->
+<html lang="ru" data-tv="obsidian">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KER — Sign in</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23E8B341' stroke-width='1.6'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Ccircle cx='12' cy='12' r='3.5'/%3E%3C/svg%3E" />
+<style>
+  :root{
+    --bg:#0A0F0D; --panel:#111917; --panel-2:#151E1B;
+    --line:rgba(232,179,65,.16); --line-soft:rgba(234,240,236,.08);
+    --ink:#EAF0EC; --muted:#8A9691; --dim:#5C6864;
+    --accent:#E8B341; --accent-ink:#1A140A; --accent-hi:#F3C55A;
+    --crit:#FF6B5A; --good:#3FD9B0;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,monospace;
+    --sans:"SF Pro Display",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --r:14px;
+  }
+  /* the deck's other palettes, so the way in matches the app it opens */
+  :root[data-tv="aurora"]{--bg:#0B0B16; --panel:#171728; --panel-2:#1F1F35;
+    --line:rgba(167,139,250,.18); --accent:#A78BFA; --accent-hi:#C4B5FD;
+    --accent-ink:#0B0B16; --ink:#F2F3FA; --muted:#A6A8C4; --dim:#6E7192}
+  :root[data-tv="carbon"]{--bg:#0B0C0D; --panel:#141518; --panel-2:#191A1E;
+    --line:rgba(255,255,255,.12); --accent:#E6E8EB; --accent-hi:#FFF;
+    --accent-ink:#0D0E10; --ink:#F4F5F6; --muted:#9A9DA3; --dim:#6B6F75}
+  :root[data-tv="hud"]{--bg:#00080C; --panel:#00121A; --panel-2:#001C27;
+    --line:rgba(0,229,255,.2); --accent:#00E5FF; --accent-hi:#7DF2FF;
+    --accent-ink:#001418; --ink:#DFF6FA; --muted:#78A6B2; --dim:#4C7681}
+
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0; font-family:var(--sans); color:var(--ink); overflow:hidden;
+    background:
+      radial-gradient(1000px 520px at 22% -10%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 62%),
+      radial-gradient(760px 420px at 88% 116%, color-mix(in srgb, var(--good) 7%, transparent), transparent 60%),
+      var(--bg);
+    display:grid; place-items:center}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+
+  .wrap{width:min(940px,94vw); display:grid; grid-template-columns:1.05fr .95fr;
+    gap:0; border:1px solid var(--line-soft); border-radius:20px; overflow:hidden;
+    background:linear-gradient(180deg, var(--panel-2), var(--panel));
+    box-shadow:0 30px 80px rgba(0,0,0,.55); animation:rise .42s cubic-bezier(.22,.7,.3,1) both}
+  @keyframes rise{from{opacity:0; transform:translateY(14px) scale(.99)}to{opacity:1; transform:none}}
+  @media (max-width:820px){.wrap{grid-template-columns:1fr}.stage{display:none}}
+
+  /* ---- left: the brand side ---- */
+  .stage{position:relative; padding:38px 34px; display:flex; flex-direction:column;
+    justify-content:space-between; border-right:1px solid var(--line-soft);
+    background:radial-gradient(520px 320px at 30% 20%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%)}
+  .brand{display:flex; align-items:center; gap:12px}
+  .brand .mk{width:38px; height:38px; border-radius:11px; display:grid; place-items:center;
+    background:color-mix(in srgb, var(--accent) 12%, transparent); border:1px solid var(--line)}
+  .brand b{font-size:17px; letter-spacing:.34em; font-weight:800}
+  .brand small{display:block; color:var(--dim); font-size:10.5px; letter-spacing:.22em; margin-top:2px}
+
+  /* reactor: pure CSS so the way in opens instantly, even on weak machines */
+  .core{position:relative; align-self:center; width:210px; height:210px; margin:8px 0}
+  .core .ring{position:absolute; inset:0; border-radius:50%; border:1px solid var(--line)}
+  .core .ring.r2{inset:22px; border-color:color-mix(in srgb, var(--accent) 34%, transparent);
+    animation:spin 14s linear infinite}
+  .core .ring.r3{inset:44px; border-style:dashed; border-color:color-mix(in srgb, var(--accent) 22%, transparent);
+    animation:spin 22s linear infinite reverse}
+  .core .hub{position:absolute; inset:70px; border-radius:50%;
+    background:radial-gradient(circle at 50% 42%, var(--accent-hi), color-mix(in srgb, var(--accent) 55%, transparent) 46%, transparent 72%);
+    box-shadow:0 0 60px color-mix(in srgb, var(--accent) 40%, transparent);
+    animation:breathe 3.4s ease-in-out infinite}
+  .core .tick{position:absolute; left:50%; top:6px; width:2px; height:12px; margin-left:-1px;
+    background:color-mix(in srgb, var(--accent) 60%, transparent); border-radius:2px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes breathe{0%,100%{opacity:.82; transform:scale(.97)}50%{opacity:1; transform:scale(1.03)}}
+  .tagline{font-size:15px; line-height:1.55; color:var(--muted); max-width:34ch}
+  .tagline b{color:var(--ink); font-weight:700}
+
+  /* ---- right: the form side ---- */
+  .panel{padding:34px 34px 28px}
+  h1{margin:0; font-size:22px; font-weight:800; letter-spacing:-.01em}
+  .sub{color:var(--muted); font-size:13.5px; margin-top:6px}
+  .tabs{display:flex; gap:6px; margin:22px 0 18px; padding:4px; border-radius:12px;
+    background:rgba(255,255,255,.03); border:1px solid var(--line-soft)}
+  .tab{flex:1; padding:9px 8px; border:0; border-radius:9px; background:transparent;
+    color:var(--muted); font:inherit; font-size:12.5px; font-weight:600; cursor:pointer;
+    transition:background .18s ease, color .18s ease, transform .16s cubic-bezier(.22,.7,.3,1)}
+  .tab:hover{color:var(--ink)}
+  .tab:active{transform:scale(.96)}
+  .tab[aria-selected="true"]{background:color-mix(in srgb, var(--accent) 16%, transparent);
+    color:var(--ink); box-shadow:inset 0 0 0 1px var(--line)}
+  .pane{display:none; animation:fade .22s cubic-bezier(.22,.7,.3,1) both}
+  .pane.on{display:block}
+  @keyframes fade{from{opacity:0; transform:translateY(6px)}to{opacity:1; transform:none}}
+  .hint{color:var(--muted); font-size:13px; line-height:1.55; margin:0 0 16px}
+  label{display:block; font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--dim); margin:0 0 6px}
+  .field{margin-bottom:13px}
+  input{width:100%; padding:12px 13px; border-radius:11px; font:inherit; font-size:14px;
+    color:var(--ink); background:rgba(255,255,255,.035);
+    border:1px solid var(--line-soft); outline:none;
+    transition:border-color .18s ease, box-shadow .18s ease, background .18s ease}
+  input:hover{background:rgba(255,255,255,.05)}
+  input:focus{border-color:color-mix(in srgb, var(--accent) 55%, transparent);
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent)}
+  .btn{width:100%; margin-top:6px; padding:13px 16px; border-radius:12px; border:1px solid var(--line);
+    background:rgba(255,255,255,.04); color:var(--ink); font:inherit; font-size:14px; font-weight:650;
+    cursor:pointer; position:relative; overflow:hidden;
+    transition:transform .16s cubic-bezier(.22,.7,.3,1), background .18s ease, border-color .18s ease}
+  .btn:hover{background:rgba(255,255,255,.07)}
+  .btn:active{transform:scale(.975)}
+  .btn.primary{background:linear-gradient(180deg, var(--accent-hi), var(--accent));
+    color:var(--accent-ink); border-color:transparent;
+    box-shadow:0 10px 26px color-mix(in srgb, var(--accent) 26%, transparent)}
+  .btn.primary:hover{filter:brightness(1.05)}
+  .btn[disabled]{opacity:.6; cursor:default; transform:none}
+  .btn .spin{display:none; width:13px; height:13px; margin-right:8px; vertical-align:-2px;
+    border:2px solid currentColor; border-right-color:transparent; border-radius:50%;
+    animation:spin .7s linear infinite}
+  .btn.busy .spin{display:inline-block}
+  .rippling::after{content:""; position:absolute; left:var(--rx,50%); top:var(--ry,50%);
+    width:8px; height:8px; margin:-4px 0 0 -4px; border-radius:50%;
+    background:radial-gradient(circle, rgba(255,255,255,.5), transparent 70%);
+    animation:ripple .55s ease-out forwards; pointer-events:none}
+  @keyframes ripple{to{transform:scale(30); opacity:0}}
+  .err{margin-top:14px; padding:11px 13px; border-radius:11px; font-size:13px; line-height:1.5;
+    color:#FFD9D3; background:rgba(255,107,90,.1); border:1px solid rgba(255,107,90,.28);
+    display:none; animation:fade .2s ease both}
+  .err.on{display:block}
+  .foot{display:flex; justify-content:space-between; align-items:center; margin-top:22px;
+    padding-top:16px; border-top:1px solid var(--line-soft); color:var(--dim);
+    font-size:11.5px; font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stage">
+    <div class="brand">
+      <div class="mk"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg></div>
+      <b><span id="brand">KER</span><small>PERSONAL AI</small></b>
+    </div>
+    <div class="core" aria-hidden="true">
+      <div class="ring r1"><div class="tick"></div></div>
+      <div class="ring r2"></div>
+      <div class="ring r3"></div>
+      <div class="hub"></div>
+    </div>
+    <p class="tagline" id="tagline"></p>
+  </div>
+
+  <div class="panel">
+    <h1 id="title">Sign in</h1>
+    <div class="sub" id="subtitle"></div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tab-local" aria-selected="true" onclick="pick('local')"></button>
+      <button class="tab" role="tab" id="tab-account" aria-selected="false" onclick="pick('account')"></button>
+      <button class="tab" role="tab" id="tab-telegram" aria-selected="false" onclick="pick('telegram')"></button>
+    </div>
+
+    <section class="pane on" id="pane-local">
+      <p class="hint" id="hint-local"></p>
+      <button class="btn primary" id="go-local" onclick="startLocal(this)"><i class="spin"></i><span></span></button>
+    </section>
+
+    <section class="pane" id="pane-account">
+      <p class="hint" id="hint-account"></p>
+      <div class="field"><label id="l-server"></label><input id="server" spellcheck="false" placeholder="http://localhost:8000" /></div>
+      <div class="field"><label id="l-user"></label><input id="user" spellcheck="false" autocomplete="username" /></div>
+      <div class="field"><label id="l-pass"></label><input id="pass" type="password" autocomplete="current-password" /></div>
+      <button class="btn primary" id="go-account" onclick="signIn(this)"><i class="spin"></i><span></span></button>
+    </section>
+
+    <section class="pane" id="pane-telegram">
+      <p class="hint" id="hint-telegram"></p>
+      <div class="field"><label id="l-server2"></label><input id="server2" spellcheck="false" placeholder="http://localhost:8000" /></div>
+      <div class="field"><label id="l-code"></label><input id="code" spellcheck="false" inputmode="numeric" placeholder="123456" /></div>
+      <button class="btn primary" id="go-telegram" onclick="redeem(this)"><i class="spin"></i><span></span></button>
+    </section>
+
+    <div class="err" id="err" role="alert"></div>
+    <div class="foot"><span id="ver">—</span><span id="modeNote"></span></div>
+  </div>
+</div>
+
+<script>
+  // Text and defaults handed over by the app (language, saved server, version).
+  const L = __STRINGS__;
+
+  // ---- bridge: the app answers requests on its own scheme ----
+  async function call(action, payload){
+    try{
+      const url = "ker://deck/call/" + action +
+                  (payload ? "?p=" + encodeURIComponent(JSON.stringify(payload)) : "");
+      const r = await fetch(url);
+      return await r.json();
+    }catch(e){
+      return {ok:false, error: L.no_bridge};
+    }
+  }
+
+  const $ = id => document.getElementById(id);
+  function text(id, s){ const el = $(id); if(el && s != null) el.textContent = s; }
+
+  // ---- paint the screen in the user's language ----
+  text("brand", L.brand); text("title", L.title); text("subtitle", L.subtitle);
+  text("tagline", L.tagline);
+  text("tab-local", L.tab_local); text("tab-account", L.tab_account);
+  text("tab-telegram", L.tab_telegram);
+  text("hint-local", L.hint_local); text("hint-account", L.hint_account);
+  text("hint-telegram", L.hint_telegram);
+  text("l-server", L.server); text("l-server2", L.server);
+  text("l-user", L.username); text("l-pass", L.password); text("l-code", L.code);
+  $("go-local").querySelector("span").textContent = L.cta_local;
+  $("go-account").querySelector("span").textContent = L.cta_account;
+  $("go-telegram").querySelector("span").textContent = L.cta_telegram;
+  text("ver", L.version_line); text("modeNote", L.foot_note);
+  if(L.server_url){ $("server").value = L.server_url; $("server2").value = L.server_url; }
+  if(L.username_value) $("user").value = L.username_value;
+  if(L.theme) document.documentElement.dataset.tv = L.theme;
+
+  // ---- tabs ----
+  function pick(which){
+    ["local","account","telegram"].forEach(k => {
+      $("tab-"+k).setAttribute("aria-selected", String(k===which));
+      $("pane-"+k).classList.toggle("on", k===which);
+    });
+    hideError();
+    const first = {local:null, account:"user", telegram:"code"}[which];
+    if(first) setTimeout(()=>$(first).focus(), 40);
+  }
+
+  // ---- feedback ----
+  function showError(msg){ const e=$("err"); e.textContent=msg; e.classList.add("on"); }
+  function hideError(){ $("err").classList.remove("on"); }
+  function busy(btn, on){
+    btn.classList.toggle("busy", on);
+    document.querySelectorAll(".btn").forEach(b => { b.disabled = on; });
+  }
+  // a light pulse from the click point — the deck's tactile feel
+  document.addEventListener("pointerdown", e => {
+    const b = e.target.closest(".btn"); if(!b) return;
+    const r = b.getBoundingClientRect();
+    b.style.setProperty("--rx", (e.clientX-r.left)+"px");
+    b.style.setProperty("--ry", (e.clientY-r.top)+"px");
+    b.classList.remove("rippling"); void b.offsetWidth; b.classList.add("rippling");
+  });
+
+  async function run(btn, action, payload){
+    hideError(); busy(btn, true);
+    const res = await call(action, payload);
+    if(res && res.ok){
+      // The app takes over from here (it is watching for a successful login);
+      // keep the button busy so nothing looks clickable mid-handover.
+      return;
+    }
+    busy(btn, false);
+    showError((res && res.error) || L.failed);
+  }
+
+  const startLocal = btn => run(btn, "login.local", {});
+  const signIn = btn => run(btn, "login.password", {
+    server: $("server").value.trim(),
+    username: $("user").value.trim(),
+    password: $("pass").value,
+  });
+  const redeem = btn => run(btn, "login.telegram", {
+    server: $("server2").value.trim(),
+    code: $("code").value.trim(),
+  });
+
+  // Enter submits whichever way in is open.
+  document.addEventListener("keydown", e => {
+    if(e.key !== "Enter") return;
+    const open = ["local","account","telegram"]
+      .find(k => $("tab-"+k).getAttribute("aria-selected") === "true");
+    $("go-"+open).click();
+  });
+</script>
+</body>
+</html>

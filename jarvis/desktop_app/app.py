@@ -1,5 +1,15 @@
 """
-The PySide6 main window and login dialog.
+The PySide6 window that hosts the KER interface.
+
+The app is the interface: one window, filled edge to edge by the deck
+(``static/desktop.html``), with the sign-in screen
+(``static/desktop_login.html``) wearing the same design. Both are served from
+the app's own URL scheme and reach back into it through
+:mod:`jarvis.desktop_app.bridge`, so every switch in there does real work.
+
+The native Qt panels that remain are the fallback for a build without
+QtWebEngine — without a web view there is no interface to render, so the app
+puts up plain widgets rather than nothing at all.
 
 Import-safe: PySide6 is imported inside :func:`run_app`, so the rest of the
 package (config, API client, engine thread) works without Qt installed.
@@ -16,21 +26,97 @@ logger = get_logger(__name__)
 
 _LANGS = [("en", "English"), ("ru", "Русский"), ("uz", "O'zbek")]
 
-# The app is one window: the Command Deck fills it, and everything a user does
-# day to day (chat, voice, memory, models, MCP, preferences) lives there in a
-# single design language. The native tabs that remain are owner-only technical
-# panels the deck cannot cover yet — provider keys, PC capability switches,
-# integrations and logs.
-_USER_TABS = ("deck",)
-_ADMIN_TABS = ("assistant", "capabilities", "integrations", "general", "logs")
+# One window: the deck fills it, and everything — chat, voice, models, memory,
+# MCP, every setting — lives in there in one design language. The native panels
+# below are the fallback for a build without QtWebEngine: no web view means no
+# interface, so the app falls back to plain widgets. The owner then gets the
+# technical panels too; a signed-in guest still doesn't.
+_FALLBACK_USER_TABS = ("chat", "voice")
+_FALLBACK_ADMIN_TABS = ("assistant", "capabilities", "integrations", "memory",
+                        "general", "logs")
 
 
-def visible_tabs(role: str) -> tuple[str, ...]:
-    """Ordered tab ids visible for ``role`` ('admin' also gets config panels)."""
-    order = ("deck", "assistant", "capabilities", "integrations", "general",
-            "logs")
-    allowed = set(_USER_TABS) if role == "user" else set(_USER_TABS) | set(_ADMIN_TABS)
+def visible_tabs(role: str, *, webview: bool = True) -> tuple[str, ...]:
+    """Ordered tab ids to show.
+
+    With a web view (every shipped build) the answer is always the deck alone.
+    Without one, fall back to the native panels ``role`` is allowed to see.
+    """
+    if webview:
+        return ("deck",)
+    order = ("chat", "voice", "assistant", "capabilities", "integrations",
+            "memory", "general", "logs")
+    allowed = set(_FALLBACK_USER_TABS)
+    if role != "user":
+        allowed |= set(_FALLBACK_ADMIN_TABS)
     return tuple(t for t in order if t in allowed)
+
+
+def webengine_available() -> bool:
+    """True when this build can render the interface."""
+    try:
+        from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+    except Exception:  # noqa: BLE001 - lean builds ship without WebEngine
+        return False
+    return True
+
+
+_DECK_PAGE_CLASS = None
+
+
+def deck_page(parent):
+    """The page the interface runs on.
+
+    Three things the default page would get wrong for an app: the microphone
+    stays blocked (the deck's mic button is real, so it must be allowed), page
+    errors vanish (they belong in the app log), and a link to the outside world
+    would replace the interface with a web page instead of opening a browser.
+    """
+    global _DECK_PAGE_CLASS
+    if _DECK_PAGE_CLASS is None:
+        from PySide6.QtWebEngineCore import QWebEnginePage
+
+        class DeckPage(QWebEnginePage):
+            def __init__(self, view) -> None:
+                super().__init__(view)
+                requested = getattr(self, "permissionRequested", None)
+                if requested is not None:      # Qt 6.8+
+                    requested.connect(self._on_permission)
+                else:  # pragma: no cover - older Qt
+                    self.featurePermissionRequested.connect(self._on_feature)
+
+            @staticmethod
+            def _on_permission(permission) -> None:
+                """Allow the microphone; refuse everything else."""
+                from PySide6.QtWebEngineCore import QWebEnginePermission
+                wanted = QWebEnginePermission.PermissionType.MediaAudioCapture
+                if permission.permissionType() == wanted:
+                    permission.grant()
+                else:
+                    permission.deny()
+
+            def _on_feature(self, origin, feature) -> None:  # pragma: no cover
+                from PySide6.QtWebEngineCore import QWebEnginePage as Page
+                audio = Page.Feature.MediaAudioCapture
+                policy = (Page.PermissionPolicy.PermissionGrantedByUser
+                          if feature == audio
+                          else Page.PermissionPolicy.PermissionDeniedByUser)
+                self.setFeaturePermission(origin, feature, policy)
+
+            def javaScriptConsoleMessage(self, level, message,  # noqa: N802
+                                         line, source) -> None:
+                logger.debug("interface: %s (%s:%s)", message, source, line)
+
+            def acceptNavigationRequest(self, url, nav_type,  # noqa: N802
+                                        is_main_frame) -> bool:
+                if is_main_frame and url.scheme() in ("http", "https"):
+                    import webbrowser
+                    webbrowser.open(url.toString())
+                    return False
+                return True
+
+        _DECK_PAGE_CLASS = DeckPage
+    return _DECK_PAGE_CLASS(parent)
 
 # Chat memory caps — keep RAM bounded on long sessions.
 _MAX_RENDER = 150   # messages painted into the transcript widget
@@ -154,6 +240,7 @@ def run_app() -> int:
         def _local(self) -> None:
             config.mode = "local"
             config.role = "admin"      # owner on their own machine
+            config.mode_chosen = True
             config.save()
             self.accept()
 
@@ -215,6 +302,7 @@ def run_app() -> int:
             self.resize(1040, 720)
             self.setMinimumSize(880, 600)
 
+            self._webview = webengine_available()
             tabs = QTabWidget()
             builders = {
                 "deck": lambda: (self._deck_tab(), "🛰  Command Deck"),
@@ -235,7 +323,7 @@ def run_app() -> int:
                                 tr("tab_general", loc)), tr("tab_general", loc)),
                 "logs": lambda: (self._logs_tab(), tr("tab_logs", loc)),
             }
-            for key in visible_tabs(config.role):
+            for key in visible_tabs(config.role, webview=self._webview):
                 widget, title = builders[key]()
                 tabs.addTab(widget, title)
             # One tab = one window: hide the tab bar so the deck reads as the app.
@@ -246,12 +334,17 @@ def run_app() -> int:
             root = QVBoxLayout(container)
             root.setContentsMargins(0, 0, 0, 0)
             root.setSpacing(0)
-            root.addWidget(self._header())
-            body = QWidget()
-            body_layout = QVBoxLayout(body)
-            body_layout.setContentsMargins(18, 8, 18, 18)
-            body_layout.addWidget(tabs)
-            root.addWidget(body, stretch=1)
+            if self._webview:
+                # The interface brings its own title bar, rail and status bar —
+                # a native header on top of it would just say KER twice.
+                root.addWidget(tabs, stretch=1)
+            else:
+                root.addWidget(self._header())
+                body = QWidget()
+                body_layout = QVBoxLayout(body)
+                body_layout.setContentsMargins(18, 8, 18, 18)
+                body_layout.addWidget(tabs)
+                root.addWidget(body, stretch=1)
             self.setCentralWidget(container)
 
             self.voice_controller = None
@@ -429,6 +522,66 @@ def run_app() -> int:
             except Exception:  # noqa: BLE001 - deck falls back to demo mode
                 self._local_api = None
 
+        #: Saving one of these changes what the engine *is*, so it is rebuilt.
+        ENGINE_FIELDS = frozenset({
+            "assistant_name", "language", "llm_provider", "llm_model",
+            "anthropic_api_key", "openai_api_key", "allow_file_read",
+            "allow_file_write", "allow_shell", "allow_desktop_control",
+            "workspace_root", "voice_enabled", "voice_replies", "stt_backend",
+            "tts_backend", "tts_voice", "weather_enabled", "homeassistant_url",
+            "homeassistant_token", "telegram_bot_token",
+            "telegram_send_enabled", "telegram_channel",
+        })
+
+        def on_settings_changed(self, changed: set[str]) -> None:
+            """React to a save the interface just made (on the GUI thread).
+
+            A setting the user flips has to mean something immediately, so the
+            look is restyled here and the engine is rebuilt when the change is
+            one it was constructed from.
+            """
+            changed = set(changed or ())
+            if "theme" in changed:
+                self._restyle(config.theme)
+            if "start_on_boot" in changed:
+                try:
+                    import sys as _sys
+
+                    from jarvis.desktop_app import autostart
+                    autostart.set_enabled(config.start_on_boot,
+                                        f'"{_sys.executable}"')
+                except Exception as exc:  # noqa: BLE001 - config still saved
+                    logger.warning("Autostart update failed: %s", exc)
+            if config.mode == "local" and (changed & self.ENGINE_FIELDS):
+                self._restart_engine()
+
+        def _restart_engine(self) -> None:
+            """Rebuild the engine so new settings are actually in force."""
+            old = self.engine_thread
+            self.engine_thread = None
+            self.voice_controller = None
+            self._local_api = None
+            if old is not None:
+                try:
+                    old.stop()
+                except Exception as exc:  # noqa: BLE001 - restart anyway
+                    logger.warning("Engine stop failed: %s", exc)
+            self._start_local_engine()
+            self._init_voice()
+            self._push_connection()
+
+        def _restyle(self, theme: str) -> None:
+            """Repaint both layers — the native shell and the interface."""
+            from jarvis.desktop_app.theme import stylesheet
+            QApplication.instance().setStyleSheet(stylesheet(theme))
+            view = getattr(self, "_deck_view", None)
+            if view is not None:
+                view.page().runJavaScript(
+                    f"applyTheme({theme!r},{{persist:false}});")
+            if self.tray is not None:
+                self.tray.setIcon(self._tray_icon())
+                self.setWindowIcon(self._tray_icon())
+
         def _init_voice(self) -> None:
             if self.engine_thread is None or not config.voice_enabled:
                 return
@@ -496,20 +649,8 @@ def run_app() -> int:
             browser dashboard is a separate product and evolves independently,
             so the two must never share a file.
             """
-            import sys
-            from pathlib import Path
-            name = "desktop.html"
-            candidates = []
-            base = getattr(sys, "_MEIPASS", None)
-            if base:
-                candidates.append(Path(base) / "jarvis" / "api" / "static" / name)
-            candidates.append(
-                Path(__file__).resolve().parents[1] / "api" / "static" / name)
-            for p in candidates:
-                if p.is_file():
-                    return p.read_text(encoding="utf-8")
-            return ("<h1 style='color:#eee;font-family:sans-serif'>"
-                    "Desktop interface not bundled.</h1>")
+            from jarvis.desktop_app.assets import interface_html
+            return interface_html("desktop.html")
 
         def _deck_conn(self) -> tuple[str, str]:
             """API endpoint + key to hand the dashboard.
@@ -544,22 +685,38 @@ def run_app() -> int:
                 lay.addStretch(1)
                 return page
             view = QWebEngineView()
-            view.setHtml(self._deck_html(), QUrl("http://localhost/"))
-            api, key = self._deck_conn()
+            # Served from the app's own scheme, so the page shares an origin
+            # with the bridge it calls and keeps its preferences between runs.
+            from jarvis.desktop_app.webbridge import BASE_URL
+            view.setPage(deck_page(view))
+            view.load(QUrl(BASE_URL))
 
             def _inject(ok: bool) -> None:
                 """Hand the deck its connection and the app's theme."""
                 if not ok:
                     return
+                api, key = self._deck_conn()
                 js = f"applyTheme({config.theme!r},{{persist:false}});"
                 if api or key:
                     js += f"CFG.api={api!r};CFG.key={key!r};loadState();refreshVoice();"
                 view.page().runJavaScript(js)
+                self._deck_ready = True
+                self._flush_greeting()
             self._deck_view = view
+            self._deck_ready = False
 
             view.loadFinished.connect(_inject)
             lay.addWidget(view)
             return page
+
+        def _push_connection(self) -> None:
+            """Point the deck at the (re)started local API."""
+            view = getattr(self, "_deck_view", None)
+            if view is None:
+                return
+            api, key = self._deck_conn()
+            view.page().runJavaScript(
+                f"CFG.api={api!r};CFG.key={key!r};loadState();refreshVoice();")
 
         def _open_deck_browser(self) -> None:
             import tempfile
@@ -636,6 +793,11 @@ def run_app() -> int:
             bar.setValue(bar.maximum())
 
         def _append_system(self, text: str) -> None:
+            if not hasattr(self, "transcript"):
+                # The interface is a web view — it has no native transcript to
+                # write into, so the note goes to the log the app can show.
+                logger.warning("%s", text)
+                return
             self._messages.append(("system", text))
             self._render_chat()
 
@@ -648,16 +810,9 @@ def run_app() -> int:
 
         def _change_theme(self) -> None:
             """Apply the chosen theme to both layers of the app."""
-            from jarvis.desktop_app.theme import stylesheet
             config.theme = self.theme_box.currentData()
             config.save()
-            inst = QApplication.instance()
-            if inst is not None:
-                inst.setStyleSheet(stylesheet(config.theme))
-            view = getattr(self, "_deck_view", None)
-            if view is not None:          # keep the embedded deck in step
-                view.page().runJavaScript(
-                    f"applyTheme({config.theme!r},{{persist:false}});")
+            self._restyle(config.theme)
 
         def _send(self) -> None:
             text = self.input.text().strip()
@@ -1173,13 +1328,31 @@ def run_app() -> int:
         # -- onboarding + notifications ---------------------------------------
 
         def maybe_onboard(self) -> None:
+            """Greet a first-time user — inside the interface, not on top of it."""
             if config.onboarded:
                 return
             loc = config.language
-            QMessageBox.information(self, tr("welcome_title", loc),
-                                    tr("welcome_body", loc))
+            if getattr(self, "_deck_view", None) is not None:
+                # Held until the deck has loaded — it cannot be told anything
+                # before its own script has run.
+                self._greeting = (f"{tr('welcome_title', loc)} — "
+                                f"{tr('welcome_body', loc)}")
+                self._flush_greeting()
+            else:
+                QMessageBox.information(self, tr("welcome_title", loc),
+                                        tr("welcome_body", loc))
             config.onboarded = True
             config.save()
+
+        def _flush_greeting(self) -> None:
+            """Show the held greeting if the deck is ready for it."""
+            text = getattr(self, "_greeting", "")
+            view = getattr(self, "_deck_view", None)
+            if not text or view is None or not getattr(self, "_deck_ready", False):
+                return
+            self._greeting = ""
+            import json
+            view.page().runJavaScript(f"toast({json.dumps(text)})")
 
         def _notify(self, text: str) -> None:
             if (self.tray is not None and config.notifications
@@ -1205,19 +1378,73 @@ def run_app() -> int:
                 self.tray.hide()
             event.accept()
 
+    # -- the way in, in the same design -----------------------------------
+
+    class WebLoginWindow(QDialog):
+        """The sign-in screen — the interface's own, not a native dialog.
+
+        Shows ``desktop_login.html`` and closes itself the moment the bridge
+        reports a successful sign-in, whichever of the three ways was used.
+        """
+
+        def __init__(self, handler) -> None:
+            super().__init__()
+            from PySide6.QtCore import QUrl
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+
+            from jarvis.desktop_app.webbridge import BASE_URL
+            self.setWindowTitle(tr("login_title", config.language))
+            self.resize(960, 620)
+            layout = QVBoxLayout(self)
+            layout.setContentsMargins(0, 0, 0, 0)
+            view = QWebEngineView()
+            view.setPage(deck_page(view))
+            view.load(QUrl(BASE_URL + "login"))
+            layout.addWidget(view)
+            handler.signals.signed_in.connect(self.accept)
+
     from PySide6.QtGui import QFont
 
+    from jarvis.desktop_app.assets import DECK, interface_html, login_page
+    from jarvis.desktop_app.bridge import Bridge
     from jarvis.desktop_app.theme import stylesheet
 
+    webview = webengine_available()
+    bridge = Bridge(config)
+    if webview:
+        # The scheme has to exist before the engine starts up.
+        from jarvis.desktop_app import webbridge
+        webbridge.register_scheme()
+
     app = QApplication([])
-    app.setApplicationName("JARVIS")
+    app.setApplicationName("KER")
     app.setStyle("Fusion")
     app.setFont(QFont("Segoe UI", 10))
     app.setStyleSheet(stylesheet(config.theme))
 
+    #: Filled in once the window exists, so saves made from the interface
+    #: reach the app that has to act on them.
+    window_ref: dict = {}
+
+    def _on_change(changed) -> None:
+        window = window_ref.get("window")
+        if window is not None:
+            window.on_settings_changed(set(changed or ()))
+
+    handler = None
+    if webview:
+        from PySide6.QtWebEngineCore import QWebEngineProfile
+        handler = webbridge.install(
+            QWebEngineProfile.defaultProfile(),
+            bridge=bridge,
+            pages={"/": lambda: interface_html(DECK),
+                   "/login": lambda: login_page(config)},
+            on_change=_on_change,
+        )
+
     client: JarvisApiClient | None = None
     if config.mode == "remote" and config.auth_token and config.server_url:
-        # Try the saved token first; fall back to the login dialog.
+        # Try the saved token first; fall back to the sign-in screen.
         candidate = JarvisApiClient(config.server_url, token=config.auth_token)
         try:
             candidate.me()
@@ -1226,13 +1453,21 @@ def run_app() -> int:
             config.auth_token = ""
             config.save()
 
-    if client is None:
-        dialog = LoginDialog()
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return 0
-        client = dialog.client
+    # A local owner has already answered this question — don't ask every launch.
+    if client is None and not (config.mode == "local" and config.mode_chosen):
+        if handler is not None:
+            login = WebLoginWindow(handler)
+            if login.exec() != QDialog.DialogCode.Accepted:
+                return 0
+            client = bridge.client
+        else:  # no web view in this build: the plain dialog still works
+            dialog = LoginDialog()
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return 0
+            client = dialog.client
 
     window = MainWindow(client)
+    window_ref["window"] = window
     window.show()
     window.maybe_onboard()
     return app.exec()

@@ -17,7 +17,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "notify_reply": "KER replied",
         "welcome_title": "Welcome to KER",
         "welcome_body": (
-            "Set your AI keys in the Assistant tab, grant PC access under PC Access, and pick a theme in the Chat tab. Enjoy, Sir."
+            "Everything lives in Settings: your API key under AI, what I may "
+            "touch under PC Access, the look under Interface. Enjoy, Sir."
         ),
         "theme": "Theme",
         "voice_settings": "Voice settings",
@@ -58,6 +59,19 @@ STRINGS: dict[str, dict[str, str]] = {
         "sign_in": "Sign in",
         "continue_local": "Continue in local mode",
         "login_failed": "Sign-in failed: {error}",
+        "login_subtitle": "Three ways in — take the one that fits.",
+        "login_tagline": ("Your assistant runs where you are: on this "
+                        "computer, with your keys and your data."),
+        "login_tab_local": "This PC",
+        "login_tab_account": "Account",
+        "login_tab_telegram": "Telegram",
+        "login_hint_telegram": ("In the bot: Link account → App login code. "
+                                "Type that code here."),
+        "login_cta_telegram": "Sign in with the code",
+        "login_code": "Login code",
+        "login_no_bridge": ("The app isn't answering. Restart KER and try "
+                            "again."),
+        "login_foot": "Local mode needs no account",
         "provider": "LLM provider",
         "model": "Model (empty = default)",
         "anthropic_key": "Anthropic API key",
@@ -99,7 +113,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "notify_reply": "KER ответил",
         "welcome_title": "Добро пожаловать в KER",
         "welcome_body": (
-            "Укажите ключи ИИ во вкладке «Ассистент», выдайте доступ к ПК во вкладке «Доступ к ПК», выберите тему во вкладке «Чат». Приятной работы."
+            "Всё в Настройках: ключ провайдера — в разделе «AI», что мне "
+            "позволено — в «Доступ к ПК», оформление — в «Интерфейс». "
+            "Приятной работы."
         ),
         "theme": "Тема",
         "voice_settings": "Настройки голоса",
@@ -140,6 +156,19 @@ STRINGS: dict[str, dict[str, str]] = {
         "sign_in": "Войти",
         "continue_local": "Продолжить локально",
         "login_failed": "Вход не выполнен: {error}",
+        "login_subtitle": "Три способа войти — выберите свой.",
+        "login_tagline": ("Ассистент работает там, где вы: на этом "
+                        "компьютере, с вашими ключами и вашими данными."),
+        "login_tab_local": "Этот ПК",
+        "login_tab_account": "Аккаунт",
+        "login_tab_telegram": "Telegram",
+        "login_hint_telegram": ("В боте: Привязать аккаунт → Код для входа в "
+                                "приложение. Введите этот код здесь."),
+        "login_cta_telegram": "Войти по коду",
+        "login_code": "Код входа",
+        "login_no_bridge": ("Приложение не отвечает. Перезапустите KER и "
+                            "попробуйте снова."),
+        "login_foot": "Для локального режима аккаунт не нужен",
         "provider": "LLM-провайдер",
         "model": "Модель (пусто = по умолчанию)",
         "anthropic_key": "Ключ Anthropic API",
@@ -181,7 +210,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "notify_reply": "KER javob berdi",
         "welcome_title": "KER ga xush kelibsiz",
         "welcome_body": (
-            "«Yordamchi» bo'limida AI kalitlarini kiriting, «Kompyuterga ruxsat»da ruxsat bering, «Suhbat»da mavzu tanlang. Yoqimli foydalanish."
+            "Hammasi Sozlamalarda: provayder kaliti — «AI» bo'limida, menga "
+            "nima ruxsat etilgani — «Kompyuterga ruxsat»da, ko'rinish — "
+            "«Interfeys»da. Yoqimli foydalanish."
         ),
         "theme": "Mavzu",
         "voice_settings": "Ovoz sozlamalari",
@@ -222,6 +253,20 @@ STRINGS: dict[str, dict[str, str]] = {
         "sign_in": "Kirish",
         "continue_local": "Lokal rejimda davom etish",
         "login_failed": "Kirish amalga oshmadi: {error}",
+        "login_subtitle": "Kirishning uch yo'li — o'zingizga mosini tanlang.",
+        "login_tagline": ("Yordamchi siz turgan joyda ishlaydi: shu "
+                        "kompyuterda, o'z kalitlaringiz va ma'lumotlaringiz "
+                        "bilan."),
+        "login_tab_local": "Shu kompyuter",
+        "login_tab_account": "Hisob",
+        "login_tab_telegram": "Telegram",
+        "login_hint_telegram": ("Botda: Hisobni ulash → Ilovaga kirish kodi. "
+                                "Shu kodni bu yerga kiriting."),
+        "login_cta_telegram": "Kod bilan kirish",
+        "login_code": "Kirish kodi",
+        "login_no_bridge": ("Ilova javob bermayapti. KER ni qayta ishga "
+                            "tushiring."),
+        "login_foot": "Lokal rejim uchun hisob kerak emas",
         "provider": "LLM provayderi",
         "model": "Model (bo'sh = standart)",
         "anthropic_key": "Anthropic API kaliti",

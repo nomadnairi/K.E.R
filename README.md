@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/Version-1.9.7-orange)](https://github.com/nomadnairi/K.E.R/releases)
+[![Version](https://img.shields.io/badge/Version-1.10.0-orange)](https://github.com/nomadnairi/K.E.R/releases)
 
 **English** · [Русский](README.ru.md) · [O'zbek](README.uz.md)
 
@@ -143,14 +143,22 @@ model, memory, voice, integrations and more.
 
 ## The desktop app — "Command Deck"
 
-`jarvis-desktop` is a real desktop app (PySide6, builds to a Windows `.exe`)
-with a live web dashboard inside it: an animated reactor home screen with system
-telemetry, a chat with history, the model catalogue, MCP servers, and settings —
-all wired to the real engine over a bundled local API, updating in real time.
+`jarvis-desktop` is a real desktop app (PySide6, builds to a Windows `.exe`),
+and the interface *is* the app: one window, no second design language. An
+animated reactor home screen with live system telemetry, chat with history, the
+model catalogue, memory, MCP servers, the log, and settings — all wired to the
+real engine over a bundled local API, updating in real time.
 
-The owner runs it locally with full control of their PC; other people can sign
-in with a username/password or a **Telegram login code** the bot hands them, and
-get a limited version. It can check for and install updates on its own.
+Signing in happens in that same design, with three ways in: **this PC** (the
+engine runs here, with your own keys), an **account**, or a **Telegram login
+code** the bot hands you. The owner gets full control of their machine; a
+signed-in guest gets a limited version.
+
+The settings in that window are the real thing — language, theme, the
+assistant's name, provider and API keys, PC capabilities, voice backends,
+integrations, auto-updates — and the app acts on each change at once, restarting
+its own engine when the change calls for it. It can check for and install
+updates on its own.
 
 Downloads (Windows installer + portable build) are on the
 [**Releases**](https://github.com/nomadnairi/K.E.R/releases) page.
