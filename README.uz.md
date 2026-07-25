@@ -163,7 +163,7 @@ API-kalitlar, kompyuterga ruxsatlar, ovoz dvigatellari, integratsiyalar,
 avto-yangilanish. Ilova har bir o'zgarishga darhol javob beradi va kerak
 bo'lganda dvigatelni o'zi qayta ishga tushiradi.
 
-Yuklab olishlar (Windows o'rnatuvchisi + portativ yig'ma) —
+Windows o'rnatuvchisi —
 [**Releases**](https://github.com/nomadnairi/K.E.R/releases) sahifasida.
 
 ---
