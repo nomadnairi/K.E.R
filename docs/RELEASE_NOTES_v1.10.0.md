@@ -68,7 +68,7 @@ log view shows the real file. One JavaScript error found this way and fixed
 **556 automated tests, all green.**
 
 ## 💻 Desktop app
-Windows installer and portable build are attached below.
+The Windows installer is attached below.
 
 ---
 🤖 Built with automated tests and CI on every commit.

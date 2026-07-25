@@ -160,7 +160,7 @@ integrations, auto-updates — and the app acts on each change at once, restarti
 its own engine when the change calls for it. It can check for and install
 updates on its own.
 
-Downloads (Windows installer + portable build) are on the
+The Windows installer is on the
 [**Releases**](https://github.com/nomadnairi/K.E.R/releases) page.
 
 ---
