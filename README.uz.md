@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/Version-1.9.6-orange)](https://github.com/nomadnairi/K.E.R/releases)
+[![Version](https://img.shields.io/badge/Version-1.9.7-orange)](https://github.com/nomadnairi/K.E.R/releases)
 
 [English](README.md) · [Русский](README.ru.md) · **O'zbek**
 

@@ -490,19 +490,26 @@ def run_app() -> int:
 
         @staticmethod
         def _deck_html() -> str:
-            """Read the packaged dashboard, working in dev and frozen builds."""
+            """Read the desktop interface, working in dev and frozen builds.
+
+            The desktop app has its **own** UI (``static/desktop.html``) — the
+            browser dashboard is a separate product and evolves independently,
+            so the two must never share a file.
+            """
             import sys
             from pathlib import Path
+            name = "desktop.html"
             candidates = []
             base = getattr(sys, "_MEIPASS", None)
             if base:
-                candidates.append(Path(base) / "jarvis" / "api" / "static" / "dashboard.html")
+                candidates.append(Path(base) / "jarvis" / "api" / "static" / name)
             candidates.append(
-                Path(__file__).resolve().parents[1] / "api" / "static" / "dashboard.html")
+                Path(__file__).resolve().parents[1] / "api" / "static" / name)
             for p in candidates:
                 if p.is_file():
                     return p.read_text(encoding="utf-8")
-            return "<h1 style='color:#eee;font-family:sans-serif'>Command Deck not bundled.</h1>"
+            return ("<h1 style='color:#eee;font-family:sans-serif'>"
+                    "Desktop interface not bundled.</h1>")
 
         def _deck_conn(self) -> tuple[str, str]:
             """API endpoint + key to hand the dashboard.
