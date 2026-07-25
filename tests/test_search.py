@@ -68,8 +68,13 @@ def test_availability_depends_on_key():
 
 def test_manager_lists_and_falls_back_to_ddg():
     mgr = SearchManager.from_settings(Settings(log_file=""))
-    # With no keys, only DuckDuckGo is available.
-    assert mgr.available() == ["duckduckgo"]
+    # With no keys the only ready backends are the keyless ones: DuckDuckGo
+    # always, plus the browser provider when Playwright happens to be installed.
+    expected = ["duckduckgo"]
+    from jarvis.search.providers import PlaywrightProvider
+    if PlaywrightProvider().available():
+        expected.append("playwright")
+    assert mgr.available() == expected
     assert mgr.providers()[0] == "tavily"       # priority order preserved
 
 

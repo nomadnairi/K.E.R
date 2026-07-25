@@ -35,7 +35,8 @@ jarvis-desktop = "jarvis.desktop_app.__main__:main"
 
 [project.optional-dependencies]
 telegram = ["aiogram>=3.0,<4.0"]
-api = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.29",
+    "python-multipart>=0.0.9"]  # audio uploads for the voice endpoints
 local-embeddings = ["fastembed>=0.3"]
 chroma = ["chromadb>=0.5,<1.0"]
 # Voice — OpenAI backends need only the base 'openai' dep. Free/offline extras:
@@ -44,7 +45,9 @@ voice-edge = ["edge-tts>=6.1"]     # free multilingual TTS
 voice-gtts = ["gTTS>=2.5"]         # free TTS
 desktop = ["pyautogui>=0.9"]       # desktop control (keyboard/mouse/screenshot)
 # Desktop app: Qt + a bundled local API (with WebSocket) for a live in-window deck.
-gui = ["PySide6>=6.6", "fastapi>=0.110", "uvicorn>=0.29", "websockets>=12"]
+gui = ["PySide6>=6.6", "fastapi>=0.110", "uvicorn>=0.29", "websockets>=12",
+    "python-multipart>=0.0.9",  # voice (STT) uploads via multipart/form-data
+    "psutil>=5.9"]              # real CPU / memory telemetry in the dashboard
 mcp = ["mcp>=1.0"]                  # connect external MCP servers (agentskills.io)
 
 [tool.setuptools.packages.find]
