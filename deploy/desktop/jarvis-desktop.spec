@@ -22,8 +22,10 @@ a = Analysis(
     ["../../jarvis/desktop_app/__main__.py"],
     pathex=[str(Path(SPECPATH).resolve().parents[1])],
     binaries=[],
-    # Ship the Command Deck web dashboard so the desktop app can render it.
+    # Ship the desktop interface (what the app renders) plus the browser
+    # dashboard, which the bundled local API can still serve at /app.
     datas=[
+        ("../../jarvis/api/static/desktop.html", "jarvis/api/static"),
         ("../../jarvis/api/static/dashboard.html", "jarvis/api/static"),
     ],
     hiddenimports=[
