@@ -16,16 +16,19 @@ logger = get_logger(__name__)
 
 _LANGS = [("en", "English"), ("ru", "Русский"), ("uz", "O'zbek")]
 
-# Tabs everyone sees vs. owner-only (admin) tabs. A signed-in guest gets a
-# limited app — no access to engine/API config, capabilities or logs.
-_USER_TABS = ("deck", "chat", "voice", "memory")
+# The app is one window: the Command Deck fills it, and everything a user does
+# day to day (chat, voice, memory, models, MCP, preferences) lives there in a
+# single design language. The native tabs that remain are owner-only technical
+# panels the deck cannot cover yet — provider keys, PC capability switches,
+# integrations and logs.
+_USER_TABS = ("deck",)
 _ADMIN_TABS = ("assistant", "capabilities", "integrations", "general", "logs")
 
 
 def visible_tabs(role: str) -> tuple[str, ...]:
-    """Ordered tab ids visible for ``role`` ('admin' sees everything)."""
-    order = ("deck", "chat", "voice", "assistant", "capabilities",
-            "integrations", "memory", "general", "logs")
+    """Ordered tab ids visible for ``role`` ('admin' also gets config panels)."""
+    order = ("deck", "assistant", "capabilities", "integrations", "general",
+            "logs")
     allowed = set(_USER_TABS) if role == "user" else set(_USER_TABS) | set(_ADMIN_TABS)
     return tuple(t for t in order if t in allowed)
 
@@ -235,6 +238,9 @@ def run_app() -> int:
             for key in visible_tabs(config.role):
                 widget, title = builders[key]()
                 tabs.addTab(widget, title)
+            # One tab = one window: hide the tab bar so the deck reads as the app.
+            if tabs.count() == 1:
+                tabs.tabBar().hide()
 
             container = QWidget()
             root = QVBoxLayout(container)
@@ -265,7 +271,7 @@ def run_app() -> int:
             from PySide6.QtCore import Qt
             from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPixmap
             from jarvis.desktop_app.theme import THEMES
-            accent = THEMES.get(config.theme, THEMES["arc"])["accent"]
+            accent = THEMES.get(config.theme, THEMES["obsidian"])["accent"]
             pix = QPixmap(64, 64)
             pix.fill(Qt.GlobalColor.transparent)
             painter = QPainter(pix)
@@ -535,9 +541,14 @@ def run_app() -> int:
             api, key = self._deck_conn()
 
             def _inject(ok: bool) -> None:
-                if ok and (api or key):
-                    view.page().runJavaScript(
-                        f"CFG.api={api!r};CFG.key={key!r};loadState();")
+                """Hand the deck its connection and the app's theme."""
+                if not ok:
+                    return
+                js = f"applyTheme({config.theme!r},{{persist:false}});"
+                if api or key:
+                    js += f"CFG.api={api!r};CFG.key={key!r};loadState();refreshVoice();"
+                view.page().runJavaScript(js)
+            self._deck_view = view
 
             view.loadFinished.connect(_inject)
             lay.addWidget(view)
@@ -629,13 +640,17 @@ def run_app() -> int:
                 session.scratch["language"] = config.language
 
         def _change_theme(self) -> None:
+            """Apply the chosen theme to both layers of the app."""
             from jarvis.desktop_app.theme import stylesheet
             config.theme = self.theme_box.currentData()
             config.save()
             inst = QApplication.instance()
             if inst is not None:
                 inst.setStyleSheet(stylesheet(config.theme))
-            self._render_chat()  # re-colour bubbles to the new palette
+            view = getattr(self, "_deck_view", None)
+            if view is not None:          # keep the embedded deck in step
+                view.page().runJavaScript(
+                    f"applyTheme({config.theme!r},{{persist:false}});")
 
         def _send(self) -> None:
             text = self.input.text().strip()
@@ -1075,6 +1090,19 @@ def run_app() -> int:
             loc = config.language
             widget = QWidget()
             layout = QVBoxLayout(widget)
+
+            # Theme picker — restyles the native shell *and* the Command Deck.
+            row = QHBoxLayout()
+            row.addWidget(QLabel(tr("theme", loc)))
+            from jarvis.desktop_app.theme import theme_names
+            self.theme_box = QComboBox()
+            for key, label in theme_names():
+                self.theme_box.addItem(label, key)
+                if key == config.theme:
+                    self.theme_box.setCurrentIndex(self.theme_box.count() - 1)
+            self.theme_box.currentIndexChanged.connect(self._change_theme)
+            row.addWidget(self.theme_box, stretch=1)
+            layout.addLayout(row)
 
             self.opt_tray = QCheckBox(tr("opt_tray", loc))
             self.opt_tray.setChecked(config.minimize_to_tray)
