@@ -104,6 +104,21 @@ def create_app(engine: JarvisEngine | None = None,
     app = FastAPI(title=f"{settings.assistant_name} API", version=__version__,
                   lifespan=lifespan)
 
+    # Every interface is a page on some other origin — the desktop app's own
+    # window, a locally run dashboard — so without this the browser refuses the
+    # request and the UI shows nothing at all.
+    origins = [o.strip() for o in settings.api_cors_origins.split(",")
+               if o.strip()]
+    if origins:
+        from fastapi.middleware.cors import CORSMiddleware
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials="*" not in origins,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
     def _principal(provided: str | None) -> str | None:
         return resolve_principal(provided, settings, service)
 

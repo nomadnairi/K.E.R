@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/Version-1.9.7-orange)](https://github.com/nomadnairi/K.E.R/releases)
+[![Version](https://img.shields.io/badge/Version-1.10.0-orange)](https://github.com/nomadnairi/K.E.R/releases)
 
 [English](README.md) · [Русский](README.ru.md) · **O'zbek**
 
@@ -147,15 +147,21 @@ ovoz, integratsiyalar va boshqalar.
 
 ## Desktop — "Command Deck"
 
-`jarvis-desktop` — bu haqiqiy desktop ilova (PySide6, Windows `.exe` ga
-yig'iladi), ichida jonli veb-panel bilan: animatsiyali reaktor bilan bosh ekran
-va tizim telemetriyasi, tarixli chat, modellar katalogi, MCP-serverlar va
-sozlamalar — hammasi ichki lokal API orqali haqiqiy dvigatelga ulangan va real
-vaqtda yangilanadi.
+`jarvis-desktop` — haqiqiy desktop ilova (PySide6, Windows `.exe` ga
+yig'iladi), va interfeys bu yerda ilovaning o'zi: bitta oyna, ikkinchi dizayn
+tili yo'q. Animatsiyali reaktor bilan bosh ekran va jonli telemetriya, tarixli
+chat, modellar katalogi, xotira, MCP-serverlar, jurnal va sozlamalar — hammasi
+ichki lokal API orqali haqiqiy dvigatelga ulangan va real vaqtda yangilanadi.
 
-Egasi uni lokal, kompyuterini to'liq boshqarib ishga tushiradi; boshqalar login/
-parol yoki bot bergan **Telegram kirish kodi** bilan kirib, cheklangan versiyani
-oladi. Ilova yangilanishlarni o'zi tekshirib o'rnata oladi.
+Kirish ham xuddi shu dizaynda, uch yo'l bilan: **shu kompyuter** (dvigatel shu
+yerda, o'z kalitlaringiz bilan), **hisob**, yoki bot bergan **Telegram kirish
+kodi**. Egasi kompyuterini to'liq boshqaradi, kirgan mehmon cheklangan
+versiyani oladi.
+
+Bu oynadagi sozlamalar haqiqiy: til, mavzu, yordamchi nomi, provayder va
+API-kalitlar, kompyuterga ruxsatlar, ovoz dvigatellari, integratsiyalar,
+avto-yangilanish. Ilova har bir o'zgarishga darhol javob beradi va kerak
+bo'lganda dvigatelni o'zi qayta ishga tushiradi.
 
 Yuklab olishlar (Windows o'rnatuvchisi + portativ yig'ma) —
 [**Releases**](https://github.com/nomadnairi/K.E.R/releases) sahifasida.

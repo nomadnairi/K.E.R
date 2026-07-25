@@ -34,6 +34,9 @@ class AppConfig:
     language: str = "en"
     #: Visual theme key (see jarvis.desktop_app.theme.THEMES).
     theme: str = "obsidian"
+    #: What this copy calls its assistant. Blank = whatever the engine ships
+    #: with, so a renamed build stays renamed without editing the app.
+    assistant_name: str = ""
 
     # -- desktop behaviour ----------------------------------------------------
     #: Hide to the system tray on close instead of quitting.
@@ -52,6 +55,9 @@ class AppConfig:
     mode: str = "local"
     #: "admin" (owner — full app) or "user" (signed-in guest — limited UI).
     role: str = "admin"
+    #: Set once the user has picked how they get in, so the sign-in screen is
+    #: not put in front of a local owner on every launch.
+    mode_chosen: bool = False
 
     # -- remote mode ----------------------------------------------------------
     server_url: str = ""
@@ -144,6 +150,8 @@ class AppConfig:
             "local_whisper_model": self.local_whisper_model,
             "voice_replies": self.voice_replies,
         }
+        if self.assistant_name:
+            overrides["assistant_name"] = self.assistant_name
         if self.llm_model:
             overrides["llm_model"] = self.llm_model
         if self.workspace_root:

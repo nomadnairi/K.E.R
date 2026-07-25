@@ -228,6 +228,12 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, gt=0, le=65535)
     #: Bearer / X-API-Key required to call the API (empty = open, dev only).
     api_key: str = ""
+    #: Browser origins allowed to call the API (comma-separated, "*" = any).
+    #: The interfaces are pages, and a page always sits on a different origin
+    #: than the API it talks to — the desktop app's own window included — so
+    #: without this the browser blocks every request. Calls still need a key;
+    #: narrow this when the API faces the internet.
+    api_cors_origins: str = "*"
 
     # --- Accounts & licensing (per-user login for exe/apk clients) ---
     #: Enable username/password accounts + license checks on the API.

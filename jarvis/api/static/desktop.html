@@ -288,6 +288,25 @@
   .swatches{display:flex; gap:10px}
   .sw{width:30px;height:30px;border-radius:9px; cursor:pointer; border:2px solid transparent}
   .sw[aria-pressed="true"]{border-color:var(--ink)}
+  /* a saved setting says so, briefly, in the corner */
+  #toast{position:fixed; right:22px; bottom:52px; z-index:60; padding:11px 16px;
+    border-radius:11px; font-size:13px; font-weight:600; color:var(--ink);
+    background:var(--panel-solid); border:1px solid var(--line);
+    box-shadow:0 14px 40px rgba(0,0,0,.5); opacity:0; transform:translateY(8px);
+    pointer-events:none; transition:opacity .2s ease, transform .2s cubic-bezier(.22,.7,.3,1)}
+  #toast.on{opacity:1; transform:none}
+  #toast.bad{border-color:rgba(255,107,90,.45); color:#FFD9D3}
+  /* the log, as it really is on disk */
+  .logwrap{display:flex; flex-direction:column; gap:12px; height:100%}
+  .logbar{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .logbar .path{font-family:var(--mono); font-size:11.5px; color:var(--dim);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1}
+  .logbox{flex:1; min-height:220px; overflow:auto; padding:14px 16px;
+    border:1px solid var(--line-soft); border-radius:var(--r);
+    background:var(--panel-solid); font-family:var(--mono); font-size:12px;
+    line-height:1.65; white-space:pre-wrap; word-break:break-word; color:var(--muted)}
+  .logbox .warn{color:var(--warn)} .logbox .crit{color:var(--crit)}
+  .logbox b{color:var(--ink); font-weight:600}
   .toggle{width:44px;height:24px;border-radius:999px; background:rgba(234,240,236,.12); border:0; cursor:pointer; position:relative; transition:.2s}
   .toggle::after{content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:var(--muted); transition:.2s}
   .toggle[aria-pressed="true"]{background:rgba(232,179,65,.3)}.toggle[aria-pressed="true"]::after{left:23px; background:var(--accent)}
@@ -554,6 +573,7 @@
     <div class="nav" data-view="mcp" onclick="go('mcp')" title="MCP серверы"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 12h16M4 17h10"/></svg><span>MCP серверы</span></div>
     <div class="grp">Система</div>
     <div class="nav" data-view="settings" onclick="go('settings')" title="Настройки"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3.9a7 7 0 0 0-1.7-1l-.4-2.5h-4l-.4 2.5a7 7 0 0 0-1.7 1L4.1 5 2 8.5 4 10a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.3.9 2-3.4-2-1.5a7 7 0 0 0 .1-1z"/></svg><span>Настройки</span></div>
+    <div class="nav" data-view="logs" onclick="go('logs')" title="Журнал"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h11l5 5v11H4z"/><path d="M8 12h8M8 16h5"/></svg><span>Журнал</span></div>
     <div class="nav" data-view="profile" onclick="go('profile')" title="Профиль"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Профиль</span></div>
     <div class="nav" data-view="about" onclick="go('about')" title="О системе"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg><span>О системе</span></div>
 
@@ -598,7 +618,7 @@
               <div class="chip"><div class="ck">Uptime</div><div class="cv" id="ifUp">—</div></div>
               <div class="chip"><div class="ck">Сессии</div><div class="cv" id="ifSess">—</div></div>
               <div class="chip"><div class="ck">Режим</div><div class="cv" id="ifMode">—</div></div>
-              <div class="chip"><div class="ck">Версия</div><div class="cv">v<span id="homeVer">1.9.7</span></div></div>
+              <div class="chip"><div class="ck">Версия</div><div class="cv">v<span id="homeVer">1.10.0</span></div></div>
             </div>
           </div>
         </div>
@@ -668,6 +688,18 @@
       </div>
     </section>
 
+    <!-- LOGS (the real file on disk, nothing staged) -->
+    <section class="view" id="view-logs" hidden>
+      <div class="logwrap">
+        <div class="logbar">
+          <button class="btn" onclick="loadLogs()">⟳ Обновить</button>
+          <button class="toggle" id="logAuto" aria-pressed="false" onclick="toggleLogAuto(this)" title="Обновлять автоматически"></button>
+          <span class="path" id="logPath">—</span>
+        </div>
+        <div class="logbox" id="logBox">Загрузка…</div>
+      </div>
+    </section>
+
     <!-- PROFILE -->
     <section class="view" id="view-profile" hidden>
       <div class="card profile"><div class="body" style="display:flex; gap:18px; align-items:center">
@@ -682,13 +714,13 @@
       <div class="card" style="max-width:520px"><div class="body" style="text-align:center; padding:32px">
         <div style="font-size:40px">🛡</div><div id="aboutName" style="font-weight:800; letter-spacing:.4em; font-size:22px; margin-top:12px">KER</div>
         <div style="color:var(--dim); font-size:13px; margin-top:6px">Personal AI Assistant</div>
-        <div style="color:var(--muted); font-family:var(--mono); margin-top:14px">Версия 1.9.7</div>
+        <div style="color:var(--muted); font-family:var(--mono); margin-top:14px">Версия 1.10.0</div>
         <div style="color:var(--dim); font-size:12px; margin-top:18px">Провайдер-независимый ассистент · MCP · тарифы · Telegram · десктоп</div>
       </div></div>
     </section>
   </div>
 
-  <div class="statusbar"><span><b id="sbName">KER</b> <b>1.9.7</b></span><span>Python <b id="sbPy">—</b></span><span>API <b id="sbApi">—</b></span><span>CPU <b id="sbCpu">—</b></span><span>Память <b id="sbMem">—</b></span><span>Сессии <b id="sbSess">—</b></span><span class="sp" id="sbClock">--:--:--</span></div>
+  <div class="statusbar"><span><b id="sbName">KER</b> <b>1.10.0</b></span><span>Python <b id="sbPy">—</b></span><span>API <b id="sbApi">—</b></span><span>CPU <b id="sbCpu">—</b></span><span>Память <b id="sbMem">—</b></span><span>Сессии <b id="sbSess">—</b></span><span class="sp" id="sbClock">--:--:--</span></div>
 </div>
 
 <script>
@@ -696,8 +728,53 @@
   CFG.api = CFG.api || localStorage.getItem("jarvis.api") || "";
   CFG.key = CFG.key || localStorage.getItem("jarvis.key") || "";
   const $ = id => document.getElementById(id);
-  const TITLE={home:"Главная",chat:"Чат",models:"Модели",memory:"Память",internet:"Интернет",mcp:"MCP серверы",settings:"Настройки",profile:"Профиль",about:"О системе"};
-  const SUB={home:"Добро пожаловать, сэр",chat:"Диалог с ассистентом",models:"Каталог моделей",memory:"Управление памятью",internet:"Веб-поиск",mcp:"Внешние инструменты (MCP)",settings:"Персонализация",profile:"Ваш профиль",about:"О системе"};
+  const TITLE={home:"Главная",chat:"Чат",models:"Модели",memory:"Память",internet:"Интернет",mcp:"MCP серверы",settings:"Настройки",logs:"Журнал",profile:"Профиль",about:"О системе"};
+  const SUB={home:"Добро пожаловать, сэр",chat:"Диалог с ассистентом",models:"Каталог моделей",memory:"Управление памятью",internet:"Веб-поиск",mcp:"Внешние инструменты (MCP)",settings:"Персонализация",logs:"Что происходило",profile:"Ваш профиль",about:"О системе"};
+
+  // ---- the app itself ----------------------------------------------------
+  // Served from ker://deck inside KER.exe, so the app answers these requests
+  // and a switch here really moves something. Opened in a plain browser there
+  // is nobody to answer: NATIVE stays false and the app-only rows say so
+  // rather than pretending to work.
+  const NATIVE = location.protocol === "ker:";
+  let APP = null;             // the app's real settings — never invented
+  let APPINFO = {};           // version, platform, themes, config path
+  async function nat(action, payload){
+    if(!NATIVE) return {ok:false, error:"Доступно в приложении KER."};
+    try{
+      const url="ker://deck/call/"+action+
+                (payload?"?p="+encodeURIComponent(JSON.stringify(payload)):"");
+      const r=await fetch(url);
+      return await r.json();
+    }catch(e){ return {ok:false, error:"Приложение не ответило: "+e}; }
+  }
+  async function loadApp(){
+    const r=await nat("settings.get");
+    if(r&&r.ok){
+      APP=r.settings;
+      APPINFO={version:r.version, platform:r.platform, themes:r.themes,
+               config_path:r.config_path};
+    }
+    return APP;
+  }
+  //: Write one or more settings, then repaint the panel from what came back.
+  async function saveApp(patch, {quiet=false}={}){
+    const r=await nat("settings.save",{settings:patch});
+    if(r&&r.ok){
+      APP=r.settings;
+      if(!quiet) toast(r.changed&&r.changed.length?"Сохранено":"Без изменений");
+    }else{
+      toast((r&&r.error)||"Не удалось сохранить","bad");
+    }
+    return r;
+  }
+  function toast(msg,kind){
+    let el=$("toast");
+    if(!el){el=document.createElement("div");el.id="toast";document.body.appendChild(el);}
+    el.textContent=msg;
+    el.className="on"+(kind==="bad"?" bad":"");
+    clearTimeout(el._t); el._t=setTimeout(()=>el.className="",2400);
+  }
   function go(v){
     document.querySelectorAll(".view").forEach(x=>{
       const on=x.id==="view-"+v; x.hidden=!on;
@@ -705,7 +782,8 @@
     });
     document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("active",n.dataset.view===v));
     $("vTitle").textContent=TITLE[v]; $("vSub").textContent=SUB[v];
-    if(v==="models") loadModels(); if(v==="settings") renderSettings(); if(v==="chat") loadSessions();}
+    if(v==="models") loadModels(); if(v==="settings") renderSettings();
+    if(v==="chat") loadSessions(); if(v==="logs") loadLogs();}
 
   function authH(){return CFG.key?{"X-API-Key":CFG.key,"Authorization":"Bearer "+CFG.key}:{};}
   function tick(){const t=new Date().toLocaleTimeString([],{hour12:false});$("clock").textContent=t;$("sbClock").textContent=t;}
@@ -772,7 +850,9 @@
       WS.onerror=()=>{try{WS.close();}catch(_){}};
     }catch(e){WS=null;}
   }
-  loadState(); connectWS(); loadModels();
+  // The catalogue is loaded further down, once its own state exists — calling
+  // it from here would run before CATALOG is initialised and throw.
+  loadState(); connectWS();
 
   // ---- models catalog ----
   // The model catalogue is loaded live from the backend (/dashboard/models).
@@ -935,95 +1015,229 @@
   function connectServer(){const spec=prompt("MCP сервер — команда (stdio) или https URL (sse):");if(!spec)return;if(!CFG.api){alert("Демо: в приложении это подключит сервер и смонтирует инструменты.");return;}fetch(CFG.api+"/dashboard/mcp",{method:"POST",headers:{"Content-Type":"application/json",...authH()},body:JSON.stringify({spec})}).then(loadState);}
   function pulse(){document.querySelectorAll(".viz i").forEach(b=>{b.style.animationDuration="0.6s";setTimeout(()=>b.style.animationDuration="1.1s",900);});}
 
-  // ---- settings (sub-nav + panels) ----
-  const SET_NAV=[["iface","Интерфейс"],["ai","AI"],["updates","Обновления"],["system","Система"],["memory","Память"],["voice","Голос"],["security","Безопасность"],["conn","Подключение"],["advanced","Расширенные"]];
+  // ---- settings ---------------------------------------------------------
+  // Every control below is bound to a real field of the app's config: it is
+  // drawn from what the app reports and written back through the bridge, and
+  // the app acts on the change at once (restyles, rebuilds the engine, writes
+  // the autostart entry). Nothing here is decoration.
+  const SET_NAV=[["iface","Интерфейс"],["assistant","Ассистент"],["ai","AI"],
+                ["capabilities","Доступ к ПК"],["voice","Голос"],
+                ["integrations","Интеграции"],["updates","Обновления"],
+                ["system","Система"],["conn","Подключение"]];
   let setTab="iface";
+  const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
+
+  function srow(t,d,ctrl){return `<div class="set-row"><div><div class="t">${t}</div><div class="d">${d}</div></div><div>${ctrl}</div></div>`;}
+  function panelInfo(h,txt){return `<div class="card"><header><h3>${h}</h3></header><div class="body" style="color:var(--muted); font-size:14px">${txt}</div></div>`;}
+  //: Shown in place of a control when the page is open outside the app, where
+  //: there is no config to write to. Honest instead of fake.
+  const appOnly=(t,d)=>srow(t,d,'<span class="badge down">в приложении</span>');
+
+  function appTog(field,t,d){
+    if(!NATIVE) return appOnly(t,d);
+    const on=!!(APP&&APP[field]);
+    return `<div class="set-row"><div><div class="t">${t}</div><div class="d">${d}</div></div>
+      <button class="toggle" data-app="${field}" aria-pressed="${on}"></button></div>`;
+  }
+  function appSel(field,t,d,opts){
+    if(!NATIVE) return appOnly(t,d);
+    const cur=(APP&&APP[field])||"";
+    return srow(t,d,`<select data-app="${field}">${opts.map(([v,n])=>
+      `<option value="${esc(v)}"${v===cur?" selected":""}>${n}</option>`).join("")}</select>`);
+  }
+  function appText(field,t,d,ph){
+    if(!NATIVE) return appOnly(t,d);
+    return srow(t,d,`<input class="tinput" data-app="${field}" placeholder="${esc(ph||"")}" value="${esc(APP&&APP[field])}" />`);
+  }
+  function appSecret(field,t,d){
+    if(!NATIVE) return appOnly(t,d);
+    const have=!!(APP&&APP[field+"_set"]);
+    return srow(t,`${d} · ${have?"сохранён":"не задан"}`,
+      `<input class="tinput" data-app="${field}" type="password" autocomplete="off"
+        placeholder="${have?"•••• оставьте пустым":"вставьте ключ"}" />`);
+  }
+
+  //: Only palettes this interface actually implements are offered — the app
+  //: knows more themes for its native shell, but picking one the deck cannot
+  //: paint would leave the two halves disagreeing.
+  function themeOptions(){
+    const known=(APPINFO.themes||[]).filter(t=>THEME_ACCENT[t.key]);
+    return known.length ? known.map(t=>[t.key,t.label]) : THEME_LIST;
+  }
+
   const P={};
   P.iface=()=>`<div class="card"><header><h3>Интерфейс</h3></header><div class="body">
-    ${srow("Язык","Язык интерфейса",`<select onchange="localStorage.setItem('jarvis.lang',this.value)"><option>Русский</option><option>English</option><option>O'zbek</option></select>`)}
-    ${srow("Тема","Оформление всего приложения",`<select id="themeSel" onchange="applyTheme(this.value)">${THEME_LIST.map(([k,n])=>`<option value="${k}">${n}</option>`).join("")}</select>`)}
-    ${srowTog("Уведомления","Всплывающие оповещения","notif")}
-    ${srowTog("Анимации","Плавность и эффекты","motion")}
-    ${srowTog("Звук","Звуковые сигналы","sound")}
+    ${appSel("language","Язык","Интерфейс и язык ответов",[["ru","Русский"],["en","English"],["uz","O'zbek"]])}
+    ${appSel("theme","Тема","Оформление всего приложения",themeOptions())}
+    ${appTog("notifications","Уведомления","Сообщать об ответе, когда окно скрыто")}
+    ${appTog("minimize_to_tray","Сворачивать в трей","Закрытие окна не выключает ассистента")}
+    ${appTog("start_on_boot","Запуск с системой","Стартовать вместе с компьютером")}
+    ${srowTog("Анимации","Плавность и эффекты (этого окна)","motion")}
   </div></div>
   <div class="card"><header><h3>Внешний вид</h3></header><div class="body">
     ${srow("Цвет акцента","Основной цвет системы",`<div class="swatches" id="swatches">${["#E8B341","#3FD9B0","#9B8CFF","#6EC1E4","#C6CDD1"].map(h=>`<button class="sw" data-a="${h}" style="background:${h}" aria-pressed="false"></button>`).join("")}</div>`)}
     ${srow("Размер шрифта","Масштаб текста",`<select id="fsSel" onchange="setFS(this.value)"><option value="sm">Малый</option><option value="md">Средний</option><option value="lg">Крупный</option></select>`)}
     ${srow("Плотность","Компактность интерфейса",`<select id="denSel" onchange="setDen(this.value)"><option value="compact">Компактная</option><option value="cozy">Комфортная</option><option value="roomy">Просторная</option></select>`)}
   </div></div>`;
-  P.ai=()=>{const a=(STATE&&STATE.ai)||{provider:"—",model:"—",profiles:[],router:false,search:"off"};
-    const prov={anthropic:"Anthropic (Claude)",openai:"OpenAI",openrouter:"OpenRouter",local:"Локальный"}[a.provider]||a.provider;
+
+  P.assistant=()=>`<div class="card"><header><h3>Ассистент</h3></header><div class="body">
+    ${appText("assistant_name","Имя","Как зовут вашего ассистента","KER")}
+    <div class="set-row"><div class="d">Имя появится в этом окне, в ответах и в озвучке. Пусто — имя по умолчанию сборки.</div></div>
+  </div></div>`;
+
+  P.ai=()=>{const a=(STATE&&STATE.ai)||{provider:null,model:null,profiles:[],router:false,search:"off"};
+    const prov={anthropic:"Anthropic (Claude)",openai:"OpenAI",openrouter:"OpenRouter",local:"Локальный"};
     const yn=b=>b?'<span class="badge up">вкл</span>':'<span class="badge down">выкл</span>';
     return `<div class="card"><header><h3>Провайдер AI</h3></header><div class="body">
-    ${srow("Провайдер","Активный движок (из конфига сервера)",`<span class="tag pop">${prov}</span>`)}
-    ${srow("Модель","Текущая модель",`<code>${a.model}</code>`)}
+    ${appSel("llm_provider","Провайдер","Чей мозг использовать",Object.entries(prov))}
+    ${appText("llm_model","Модель","Пусто — модель по умолчанию провайдера","claude-sonnet-4-5")}
+    ${appSecret("anthropic_api_key","Ключ Anthropic","Для моделей Claude")}
+    ${appSecret("openai_api_key","Ключ OpenAI","Для GPT, а также голоса OpenAI")}
+    <div class="set-row"><div class="d">После сохранения движок перезапускается сам — ключ действует сразу.</div></div>
+  </div></div>
+  <div class="card"><header><h3>Что работает сейчас</h3></header><div class="body">
+    ${srow("Активный провайдер","Как отвечает движок в эту секунду",`<span class="tag pop">${dash(prov[a.provider]||a.provider)}</span>`)}
+    ${srow("Активная модель","Из работающего движка",`<code>${dash(a.model)}</code>`)}
     ${srow("Профили","Переключаемые провайдеры",(a.profiles&&a.profiles.length?a.profiles:["—"]).map(p=>`<span class="tag">${p}</span>`).join(" "))}
     ${srow("AI-роутер","Простое → быстрая, сложное → сильная",yn(a.router))}
-  </div></div>
-  <div class="card"><header><h3>Поиск в интернете</h3></header><div class="body">
-    ${srow("Провайдер поиска","AI-search → web → браузер",a.search==="off"?'<span class="badge down">выкл</span>':`<span class="tag">${a.search}</span>`)}
-    <div class="set-row"><div class="d">Меняется в <code>.env</code> сервера. Здесь показано реальное состояние.</div></div>
+    ${srow("Поиск в интернете","AI-search → web → браузер",a.search&&a.search!=="off"?`<span class="tag">${a.search}</span>`:'<span class="badge down">выкл</span>')}
   </div></div>`;};
+
+  P.capabilities=()=>{const s=(STATE&&STATE.security)||{};
+    const st=(b,on="разрешено",off="запрещено")=>b?`<span class="badge up">${on}</span>`:`<span class="badge down">${off}</span>`;
+    return `<div class="card"><header><h3>Доступ к этому компьютеру</h3></header><div class="body">
+    ${appTog("allow_file_read","Читать файлы","Только внутри рабочей папки")}
+    ${appTog("allow_file_write","Создавать и менять файлы","Осторожно: ассистент сможет писать на диск")}
+    ${appTog("allow_shell","Выполнять команды","Осторожно: доступ к терминалу")}
+    ${appTog("allow_desktop_control","Управлять ПК","Клавиатура, мышь, скриншоты")}
+    ${appText("workspace_root","Рабочая папка","Границы для файловых операций","C:\\\\Users\\\\you\\\\KER")}
+    <div class="set-row"><div class="d">Опасные права по умолчанию выключены и включаются по одному.</div></div>
+  </div></div>
+  <div class="card"><header><h3>Что движок применяет сейчас</h3></header><div class="body">
+    ${srow("Запись файлов","Состояние в работающем движке",st(s.file_write))}
+    ${srow("Выполнение команд","Состояние в работающем движке",st(s.shell))}
+    ${srow("Управление ПК","Состояние в работающем движке",st(s.desktop))}
+    ${srow("Редакция секретов","Токены и ключи не попадают в память",st(s.redact,"включено","выключено"))}
+  </div></div>`;};
+
+  P.voice=()=>`<div class="card"><header><h3>Голос</h3></header><div class="body">
+    ${appTog("voice_enabled","Голос включён","Распознавание и синтез речи")}
+    ${appTog("voice_replies","Озвучивать ответы","Отвечать голосом, а не только текстом")}
+    ${appSel("stt_backend","Распознавание речи","Чем расшифровывать голос",[["openai","OpenAI Whisper (ключ)"],["local","Локальный Whisper (бесплатно)"]])}
+    ${appSel("tts_backend","Синтез речи","Чем говорить",[["openai","OpenAI (ключ)"],["edge","Edge TTS (бесплатно)"],["gtts","gTTS (бесплатно)"]])}
+    ${appText("tts_voice","Голос","Имя голоса выбранного движка","alloy")}
+  </div></div>
+  <div class="card"><header><h3>Проверено на движке</h3></header><div class="body">
+    ${srow("Распознавание","Реальный ответ /voice/status",VOICE.stt?'<span class="badge up">работает</span>':'<span class="badge down">не настроено</span>')}
+    ${srow("Синтез","Реальный ответ /voice/status",VOICE.tts?'<span class="badge up">работает</span>':'<span class="badge down">не настроено</span>')}
+    <div class="set-row"><div class="d">Микрофон на Главной использует именно это. Бесплатные движки ключа не требуют.</div></div>
+  </div></div>`;
+
+  P.integrations=()=>`<div class="card"><header><h3>Погода</h3></header><div class="body">
+    ${appTog("weather_enabled","Погода","Ассистент может смотреть прогноз")}
+  </div></div>
+  <div class="card"><header><h3>Умный дом (Home Assistant)</h3></header><div class="body">
+    ${appText("homeassistant_url","Адрес","http://homeassistant.local:8123","http://homeassistant.local:8123")}
+    ${appSecret("homeassistant_token","Токен","Long-lived access token")}
+  </div></div>
+  <div class="card"><header><h3>Telegram</h3></header><div class="body">
+    ${appSecret("telegram_bot_token","Токен бота","Для отправки сообщений от вашего имени")}
+    ${appTog("telegram_send_enabled","Разрешить отправку","Ассистент может писать в Telegram")}
+    ${appText("telegram_channel","Канал","@ваш_канал или id","@your_channel")}
+  </div></div>`;
+
   P.updates=()=>`<div class="card"><header><h3>Обновления</h3></header><div class="body">
-    <div class="set-row"><div><div class="t">Текущая версия</div><div class="d">Установленная сборка</div></div><code id="updCur">1.9.7</code></div>
-    <div class="set-row"><div><div class="t">Последняя версия</div><div class="d" id="updChan">Канал: ранний доступ</div></div><span id="updLatest" class="tag">—</span></div>
-    <div class="set-row"><div><div class="t">Автообновление</div><div class="d" id="updAutoHint">Обновляться сразу, как выходит релиз</div></div>
-      <button class="toggle" id="updAutoTog" aria-pressed="false" onclick="toggleAuto(this)"></button></div>
+    <div class="set-row"><div><div class="t">Текущая версия</div><div class="d">Установленная сборка</div></div><code id="updCur">${esc(APPINFO.version||"—")}</code></div>
+    <div class="set-row"><div><div class="t">Последняя версия</div><div class="d" id="updChan">Канал: —</div></div><span id="updLatest" class="tag">—</span></div>
+    ${appTog("auto_update","Автообновление","Ставить новую версию сразу, как выходит")}
+    ${appSel("update_channel","Канал","Что считать новой версией",[["early","Ранний доступ (pre-release)"],["stable","Только стабильные"]])}
     <div style="display:flex; gap:10px; margin-top:14px">
       <button class="btn" onclick="checkUpdate()">🔄 Проверить обновления</button>
       <button class="btn" id="updNow" style="display:none" onclick="doUpdate()">⬇️ Обновить сейчас</button>
     </div>
     <div id="updBox" style="color:var(--muted); font-size:13px; margin-top:12px"></div>
-  </div></div>
-  <div class="card"><header><h3>Канал обновлений</h3></header><div class="body">
-    ${srow("Источник","Откуда брать обновления",`<select id="updSrc"><option value="early">GitHub · ранний доступ</option><option value="stable">GitHub · стабильные</option><option value="channel">Telegram-канал</option></select>`)}
-    <div class="set-row"><div class="d">Ранний доступ (pre-release) — новые фичи первыми. Стабильные — только проверенные.</div></div>
   </div></div>`;
-  P.system=()=>panelInfo("Система","CPU/RAM, аптайм и активные инструменты показаны на Главной. Логи и диагностика — через <code>/doctor</code> и API <code>/health</code>.");
-  P.memory=()=>panelInfo("Память","Семантическая память включена. Факты извлекаются автоматически; секреты редактируются перед сохранением. Управление — в боте.");
-  P.voice=()=>`<div class="card"><header><h3>Голос</h3></header><div class="body">
-    ${srowTog("Голосовые ответы","Озвучивать ответы","voice")}
-    ${srow("Голос TTS","Синтез речи","<select><option>alloy</option><option>edge</option><option>gTTS</option></select>")}
+
+  P.system=()=>`<div class="card"><header><h3>Система</h3></header><div class="body">
+    ${srow("Версия","Эта сборка",`<code>${esc(APPINFO.version||"—")}</code>`)}
+    ${srow("Платформа","Где запущено",`<code>${esc(APPINFO.platform||"—")}</code>`)}
+    ${srow("Python","Из работающего движка",`<code>${dash(STATE&&STATE.python)}</code>`)}
+    ${srow("Файл настроек","Где лежит ваша конфигурация",`<code style="font-size:11px">${esc(APPINFO.config_path||"—")}</code>`)}
+    ${srow("Журнал","Что происходило внутри",'<button class="btn" onclick="go(\'logs\')">Открыть журнал</button>')}
+    ${NATIVE?srow("Сброс настроек","Вернуть всё к значениям по умолчанию",'<button class="btn" onclick="resetApp()">Сбросить</button>'):""}
   </div></div>`;
-  P.security=()=>{const s=(STATE&&STATE.security)||{file_write:false,shell:false,desktop:false,redact:true};
-    const st=(b,onTxt="разрешено",offTxt="запрещено")=>b?`<span class="badge up">${onTxt}</span>`:`<span class="badge down">${offTxt}</span>`;
-    return `<div class="card"><header><h3>Безопасность (реальный статус сервера)</h3></header><div class="body">
-    ${srow("Запись файлов","Изменение файлов ассистентом",st(s.file_write))}
-    ${srow("Выполнение команд","Shell-доступ",st(s.shell))}
-    ${srow("Управление ПК","Клавиатура/мышь/скриншот",st(s.desktop))}
-    ${srow("Редакция секретов","Токены/ключи не пишутся в память",st(s.redact,"включено","выключено"))}
-    <div class="set-row"><div class="d">Опасные права по умолчанию выключены. Меняются только в конфиге сервера (<code>ALLOW_*</code>).</div></div>
-  </div></div>`;};
+
   P.conn=()=>`<div class="card"><header><h3>Подключение</h3></header><div class="body">
     <div class="field"><label>API endpoint</label><input class="tinput" id="api" placeholder="http://localhost:8000" /></div>
     <div class="field"><label>API ключ</label><input class="tinput" id="key" type="password" placeholder="необязательно" /></div>
     <button class="btn" onclick="saveConn()">Сохранить и переподключиться</button>
+    <div class="set-row"><div class="d">В приложении это заполняется само: движок поднимает локальный API при запуске.</div></div>
   </div></div>`;
-  P.advanced=()=>panelInfo("Расширенные","Экспорт диалогов, сброс памяти и очистка кэша появятся здесь. Полная конфигурация — через <code>.env</code> и Configuration Manager.");
-  function srow(t,d,ctrl){return `<div class="set-row"><div><div class="t">${t}</div><div class="d">${d}</div></div><div>${ctrl}</div></div>`;}
+
   function srowTog(t,d,key){const on=localStorage.getItem("jarvis."+key)!=="off";return `<div class="set-row"><div><div class="t">${t}</div><div class="d">${d}</div></div><button class="toggle" aria-pressed="${on}" onclick="tog('${key}',this)"></button></div>`;}
-  function panelInfo(h,txt){return `<div class="card"><header><h3>${h}</h3></header><div class="body" style="color:var(--muted); font-size:14px">${txt}</div></div>`;}
-  function renderSettings(){
+
+  async function renderSettings(){
+    if(NATIVE && !APP) await loadApp();
     $("snav").innerHTML=SET_NAV.map(([id,nm])=>`<div class="sitem ${id===setTab?'on':''}" onclick="setTab='${id}';renderSettings()">${nm}</div>`).join("");
     $("spanel").innerHTML=P[setTab]();
     if(setTab==="iface"){syncAccent(); $("fsSel").value=document.documentElement.dataset.fs; $("denSel").value=document.documentElement.dataset.density;}
     if(setTab==="conn"){$("api").value=CFG.api;$("key").value=CFG.key;}
-    if(setTab==="updates"){initUpdates(); checkUpdate();}
+    if(setTab==="updates"){checkUpdate();}
+  }
+
+  // One listener for every app-backed control, so adding a setting is one row.
+  document.addEventListener("click",async e=>{
+    const t=e.target.closest('.toggle[data-app]'); if(!t) return;
+    const field=t.dataset.app, on=t.getAttribute("aria-pressed")!=="true";
+    t.setAttribute("aria-pressed",String(on));
+    const r=await saveApp({[field]:on});
+    if(!r||!r.ok) t.setAttribute("aria-pressed",String(!on));   // put it back
+  });
+  document.addEventListener("change",async e=>{
+    const el=e.target.closest('select[data-app],input[data-app]'); if(!el) return;
+    const field=el.dataset.app, value=el.value;
+    if(el.type==="password" && !value) return;      // blank = keep the old key
+    const r=await saveApp({[field]:value});
+    if(r&&r.ok){
+      if(field==="theme") applyTheme(value,{persist:false});
+      if(field==="assistant_name") applyName(value||"KER");
+      if(el.type==="password"){el.value=""; renderSettings();}
+    }
+  });
+  async function resetApp(){
+    if(!confirm("Сбросить все настройки приложения к значениям по умолчанию?")) return;
+    const r=await nat("settings.reset");
+    if(r&&r.ok){APP=r.settings; toast("Настройки сброшены"); renderSettings();
+      applyTheme(APP.theme||"obsidian",{persist:false});}
+    else toast((r&&r.error)||"Не удалось сбросить","bad");
+  }
+
+  // ---- the log, straight off disk ----------------------------------------
+  let LOGTIMER=null;
+  async function loadLogs(){
+    const box=$("logBox"); if(!box) return;
+    if(!NATIVE){box.textContent="Журнал доступен в приложении KER.";return;}
+    const r=await nat("logs.tail",{lines:400});
+    if(!r||!r.ok){box.textContent=(r&&r.error)||"Не удалось прочитать журнал.";return;}
+    $("logPath").textContent=r.path||"файл журнала ещё не создан";
+    if(!r.lines.length){box.textContent="Пока пусто — журнал появится, когда движок начнёт работу.";return;}
+    box.innerHTML=r.lines.map(line=>{
+      const cls=/ERROR|CRITICAL|Traceback/.test(line)?"crit":(/WARN/.test(line)?"warn":"");
+      return `<div class="${cls}">${esc(line)}</div>`;
+    }).join("");
+    box.scrollTop=box.scrollHeight;
+  }
+  function toggleLogAuto(el){
+    const on=el.getAttribute("aria-pressed")!=="true";
+    el.setAttribute("aria-pressed",String(on));
+    if(LOGTIMER){clearInterval(LOGTIMER);LOGTIMER=null;}
+    if(on){LOGTIMER=setInterval(loadLogs,4000);loadLogs();}
   }
 
   // ---- updates ----
+  // The auto-update switch and the channel are app settings now (see P.updates),
+  // so they persist for real; this part only reports what the engine found.
   let UPD=null;
-  function initUpdates(){
-    const auto=localStorage.getItem("jarvis.autoupdate")==="on";
-    $("updAutoTog").setAttribute("aria-pressed",String(auto));
-    const src=localStorage.getItem("jarvis.updsrc")||"early";
-    if($("updSrc")){$("updSrc").value=src;$("updSrc").onchange=e=>localStorage.setItem("jarvis.updsrc",e.target.value);}
-  }
-  function toggleAuto(el){
-    if(UPD&&UPD.auto_allowed===false){alert("Автообновление доступно по подписке (Plus/Pro). Оформите тариф, чтобы включить.");return;}
-    const on=el.getAttribute("aria-pressed")!=="true";el.setAttribute("aria-pressed",String(on));
-    localStorage.setItem("jarvis.autoupdate",on?"on":"off");
-  }
   async function checkUpdate(){
     const box=$("updBox");if(!box)return;
     if(!CFG.api){box.innerHTML='Демо-режим: обновления берутся из GitHub-релизов. Подключите бэкенд в разделе «Подключение».';return;}
@@ -1032,18 +1246,15 @@
     catch(e){box.textContent="Не удалось проверить обновления.";}
   }
   function renderUpd(){
-    const u=UPD||{};const box=$("updBox");
-    $("updCur").textContent=u.current||"1.9.7";
-    $("updLatest").textContent=u.latest||"—";
-    $("updLatest").className="tag "+(u.available?"pop":"");
-    $("updChan").textContent="Канал: "+({early:"ранний доступ",stable:"стабильные",off:"выключено"}[u.channel_mode]||u.channel_mode||"—");
-    $("updNow").style.display=u.available?"inline-flex":"none";
-    if(u.auto_allowed===false){
-      $("updAutoTog").setAttribute("aria-pressed","false");
-      $("updAutoHint").innerHTML='🔒 Доступно по подписке (Plus/Pro)';
-    }
+    const u=UPD||{};const box=$("updBox"); if(!box) return;
+    set("updCur",u.current||APPINFO.version||"—");
+    const latest=$("updLatest");
+    if(latest){latest.textContent=u.latest||"—";
+      latest.className="tag "+(u.available?"pop":"");}
+    set("updChan","Канал: "+({early:"ранний доступ",stable:"стабильные",off:"выключено"}[u.channel_mode]||u.channel_mode||"—"));
+    const now=$("updNow"); if(now) now.style.display=u.available?"inline-flex":"none";
     box.innerHTML=u.available
-      ? `🎉 Доступна новая версия <b>${u.latest}</b>! Нажмите «Обновить сейчас».`
+      ? `🎉 Доступна новая версия <b>${esc(u.latest)}</b>! Нажмите «Обновить сейчас».`
       : (u.channel_mode==="off"?"Проверка обновлений выключена.":"✅ У вас последняя версия.");
   }
   function doUpdate(){
@@ -1096,6 +1307,14 @@
 
   // Probe real voice availability once everything is declared.
   refreshVoice();
+
+  // Inside the app: take the real config straight away, so the interface opens
+  // wearing the user's own theme and name instead of a default it has to correct.
+  if(NATIVE) loadApp().then(a=>{
+    if(!a) return;
+    if(a.theme) applyTheme(a.theme,{persist:false});
+    if(a.assistant_name) applyName(a.assistant_name);
+  });
 
   // ---- real WebGL 3D reactor (graceful: falls back to the CSS reactor) ----
   (function reactor3D(){
@@ -1169,6 +1388,10 @@
     document.addEventListener("visibilitychange",()=>{last=0;});
     requestAnimationFrame(frame);
   })();
+
+  // Last thing in the file: the catalogue reaches across most of this script,
+  // so it can only be loaded once every piece of state above exists.
+  loadModels();
 </script>
 </body>
 </html>
