@@ -18,6 +18,19 @@ DECK = "desktop.html"
 LOGIN = "desktop_login.html"
 
 
+def icon_path(name: str = "ker.ico") -> Path | None:
+    """Locate the app icon, in a checkout or inside a frozen build."""
+    candidates: list[Path] = []
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        candidates.append(Path(base) / "jarvis" / "desktop_app" / "assets" / name)
+    candidates.append(Path(__file__).resolve().parent / "assets" / name)
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
 def interface_path(name: str) -> Path | None:
     """Locate an interface file, in a checkout or inside a frozen build."""
     candidates: list[Path] = []

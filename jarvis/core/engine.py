@@ -66,6 +66,7 @@ class JarvisEngine:
         self.integrations = self.container.integrations  # None when disabled
         self.goals = self.container.goals  # None when goals are disabled
         self.security = self.container.security  # capability gate + audit
+        self.search = self.container.search  # None when web search is off
         self.router = self.container.router  # model-tier routing
         self.tools = self.container.tool_manager  # tool governance/introspection
         self.mcp = self.container.mcp_manager  # None unless MCP is enabled

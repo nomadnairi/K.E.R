@@ -33,6 +33,9 @@ class MemoryRecord:
     score: float = 0.0          # relevance score (set on recall)
     timestamp: datetime = field(default_factory=_now)
     metadata: dict = field(default_factory=dict)
+    #: Set by stores that can address one memory, so it can be listed and
+    #: deleted individually. ``None`` means this store cannot address items.
+    record_id: int | None = None
 
     def to_dict(self) -> dict:
         """JSON-serialisable representation (for disk persistence)."""
@@ -97,3 +100,25 @@ class BaseMemoryStore(ABC):
     def count(self, session_id: str | None = None) -> int:  # pragma: no cover - default
         """Number of stored records (optionally scoped to a session)."""
         return 0
+
+    # -- browsing -----------------------------------------------------------
+    # Recall answers "what is relevant to this question". Showing a person what
+    # their assistant remembers is a different question, so it gets its own
+    # pair: list newest-first, and delete one item.
+
+    def browse(self, *, session_id: str | None = None, limit: int = 100,
+            offset: int = 0) -> list[MemoryRecord]:
+        """Stored memories, newest first.
+
+        Stores that cannot enumerate return an empty list — callers show that
+        as "this backend cannot list memories", never as "you have none".
+        """
+        return []
+
+    def can_browse(self) -> bool:
+        """Whether :meth:`browse` and :meth:`delete` actually do something."""
+        return False
+
+    def delete(self, record_id: int) -> bool:
+        """Remove one memory by id; ``False`` if it was not there."""
+        return False

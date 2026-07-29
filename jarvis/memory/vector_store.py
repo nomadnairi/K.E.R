@@ -45,6 +45,9 @@ class InMemoryVectorStore(BaseMemoryStore):
 
     def remember(self, record: MemoryRecord) -> None:
         embedding = self.embedder.embed(record.content)
+        # Position is the id here: stable for as long as the store lives, which
+        # is all a list-and-delete view needs.
+        record.record_id = len(self._entries)
         self._entries.append(_Entry(record=record, embedding=embedding))
         self._save()
 
@@ -79,7 +82,28 @@ class InMemoryVectorStore(BaseMemoryStore):
             ]
         self._save()
 
+    def delete(self, record_id: int) -> bool:
+        before = len(self._entries)
+        self._entries = [e for e in self._entries
+                        if e.record.record_id != record_id]
+        if len(self._entries) == before:
+            return False
+        self._save()
+        return True
+
     # -- introspection ------------------------------------------------------
+
+    def browse(self, *, session_id: str | None = None, limit: int = 100,
+            offset: int = 0) -> list[MemoryRecord]:
+        """Stored memories, newest first."""
+        picked = [e.record for e in self._entries
+                if session_id is None or e.record.session_id == session_id]
+        picked.reverse()
+        offset = max(0, int(offset))
+        return picked[offset:offset + max(1, min(int(limit), 500))]
+
+    def can_browse(self) -> bool:
+        return True
 
     def count(self, session_id: str | None = None) -> int:
         if session_id is None:

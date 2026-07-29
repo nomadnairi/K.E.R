@@ -181,6 +181,26 @@ class MemoryManager:
         lines.extend(f"- {r.content}" for r in records)
         return "\n".join(lines)
 
+    # -- what the user is shown ---------------------------------------------
+    # Recall answers "what matters for this question". Showing someone what
+    # their assistant remembers is a different question, so it has its own way in.
+
+    async def browse(self, *, session_id: str | None = None,
+                    limit: int = 100, offset: int = 0) -> list[MemoryRecord]:
+        """Stored memories, newest first."""
+        return await asyncio.to_thread(
+            self.vectors.browse, session_id=session_id, limit=limit,
+            offset=offset,
+        )
+
+    def can_browse(self) -> bool:
+        """Whether this backend can list and delete individual memories."""
+        return self.vectors.can_browse()
+
+    async def delete_memory(self, record_id: int) -> bool:
+        """Forget one specific thing."""
+        return await asyncio.to_thread(self.vectors.delete, record_id)
+
     # -- lifecycle ----------------------------------------------------------
 
     async def forget(self, session_id: str | None = "default") -> None:

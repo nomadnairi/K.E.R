@@ -360,6 +360,10 @@ def create_app(engine: JarvisEngine | None = None,
         rows = await _a.to_thread(mem.conversations.recent, 20)
         return {"sessions": rows}
 
+    def _broker():
+        """The engine's confirmation broker, when it has one."""
+        return getattr(engine.security, "confirmer", None)
+
     async def _state_payload() -> dict:
         from jarvis.core.capabilities import CapabilityManager
         cap_state = {"enabled": "on", "restricted": "res", "disabled": "off"}
@@ -387,7 +391,14 @@ def create_app(engine: JarvisEngine | None = None,
             "security": {"file_write": settings.allow_file_write,
                         "shell": settings.allow_shell,
                         "desktop": settings.allow_desktop_control,
-                        "redact": settings.memory_redact_secrets},
+                        "redact": settings.memory_redact_secrets,
+                        # What the running engine actually enforces, per
+                        # capability: off / ask / on.
+                        "modes": engine.security.modes()},
+            # Questions the assistant is waiting on right now. Carried in the
+            # state payload so the interface learns about them through the
+            # channel it already listens to.
+            "confirmations": _broker().pending() if _broker() else [],
             "weather": await _weather(),
         }
 
@@ -407,7 +418,11 @@ def create_app(engine: JarvisEngine | None = None,
         try:
             while True:
                 await websocket.send_json(await _state_payload())
-                await _a.sleep(5)
+                # A question the assistant is blocked on must reach the screen
+                # quickly; the rest of the state can wait five seconds.
+                broker = _broker()
+                waiting = bool(broker and broker.pending())
+                await _a.sleep(0.7 if waiting else 5)
         except WebSocketDisconnect:
             return
         except Exception:  # noqa: BLE001 - client gone / send failed
@@ -526,6 +541,155 @@ def create_app(engine: JarvisEngine | None = None,
             except Exception:  # noqa: BLE001 - ignore duplicates
                 pass
         return {"connected": True, "server": cfg.name, "tools": len(skills)}
+
+    # -- permission questions ------------------------------------------------
+
+    class _ConfirmIn(BaseModel):
+        id: str
+        allow: bool
+
+    @app.get("/dashboard/confirmations")
+    async def dashboard_confirmations(
+            _: str = Depends(require_principal)) -> dict:
+        """Anything the assistant is currently waiting on the user for."""
+        broker = _broker()
+        return {"pending": broker.pending() if broker else []}
+
+    @app.post("/dashboard/confirm")
+    async def dashboard_confirm(body: _ConfirmIn,
+                                _: str = Depends(require_principal)) -> dict:
+        """Answer one permission question."""
+        broker = _broker()
+        if broker is None:
+            raise HTTPException(status_code=503,
+                                detail="This engine does not ask for "
+                                        "confirmation.")
+        answered = broker.resolve(body.id, body.allow)
+        if not answered:
+            # Already answered, or it timed out while the user was deciding.
+            raise HTTPException(status_code=404,
+                                detail="That request is no longer waiting.")
+        return {"ok": True, "id": body.id, "allowed": body.allow}
+
+    # -- memory --------------------------------------------------------------
+
+    def _memory():
+        return getattr(engine, "memory", None)
+
+    def _memory_or_503():
+        memory = _memory()
+        if memory is None:
+            raise HTTPException(status_code=503,
+                                detail="Memory is switched off for this "
+                                        "assistant.")
+        return memory
+
+    @app.get("/dashboard/memory")
+    async def dashboard_memory(limit: int = 100, offset: int = 0,
+                            session: str = "",
+                            _: str = Depends(require_principal)) -> dict:
+        """What the assistant remembers, newest first."""
+        memory = _memory_or_503()
+        records = await memory.browse(session_id=session or None,
+                                    limit=limit, offset=offset)
+        return {
+            "can_browse": memory.can_browse(),
+            "stats": memory.stats(),
+            "items": [{"id": r.record_id, "content": r.content,
+                    "kind": r.kind, "session": r.session_id,
+                    "timestamp": r.timestamp.isoformat()} for r in records],
+        }
+
+    @app.get("/dashboard/memory/search")
+    async def dashboard_memory_search(q: str, limit: int = 20,
+                                    _: str = Depends(require_principal)) -> dict:
+        """Search memories the way the assistant itself recalls them."""
+        memory = _memory_or_503()
+        if not q.strip():
+            return {"items": []}
+        records = await memory.recall(q, session_id=None, limit=limit)
+        return {"items": [{"id": r.record_id, "content": r.content,
+                        "kind": r.kind, "session": r.session_id,
+                        "score": round(r.score, 3),
+                        "timestamp": r.timestamp.isoformat()}
+                        for r in records]}
+
+    @app.delete("/dashboard/memory/{record_id}")
+    async def dashboard_memory_delete(record_id: int,
+                                    _: str = Depends(require_principal)) -> dict:
+        """Forget one specific thing."""
+        memory = _memory_or_503()
+        removed = await memory.delete_memory(record_id)
+        if not removed:
+            raise HTTPException(status_code=404, detail="No such memory.")
+        return {"ok": True, "id": record_id}
+
+    class _ForgetIn(BaseModel):
+        session: str | None = None
+        everything: bool = False
+
+    @app.post("/dashboard/memory/forget")
+    async def dashboard_memory_forget(body: _ForgetIn,
+                                    _: str = Depends(require_principal)) -> dict:
+        """Clear a session's memory, or all of it."""
+        memory = _memory_or_503()
+        await memory.forget(None if body.everything else (body.session or "default"))
+        return {"ok": True, "stats": memory.stats()}
+
+    # -- web search ----------------------------------------------------------
+
+    def _search():
+        return getattr(engine, "search", None)
+
+    def _search_or_503():
+        search = _search()
+        if search is None:
+            raise HTTPException(status_code=503,
+                                detail="Web search is switched off for this "
+                                        "assistant.")
+        return search
+
+    @app.get("/dashboard/search/providers")
+    async def dashboard_search_providers(
+            _: str = Depends(require_principal)) -> dict:
+        """Every search backend, and whether it is actually usable."""
+        search = _search()
+        if search is None:
+            return {"enabled": False, "active": None, "preferred":
+                    settings.search_provider, "providers": []}
+        return {
+            "enabled": settings.search_enabled,
+            "active": search.active(),
+            "preferred": settings.search_provider,
+            "providers": [{"name": s.name, "label": s.label, "kind": s.kind,
+                        "available": s.available,
+                        "requires_key": s.requires_key,
+                        "is_default": s.is_default}
+                        for s in search.statuses()],
+        }
+
+    class _SearchIn(BaseModel):
+        query: str
+        provider: str | None = None
+        limit: int = 5
+
+    @app.post("/dashboard/search/test")
+    async def dashboard_search_test(body: _SearchIn,
+                                    _: str = Depends(require_principal)) -> dict:
+        """Run a real search, so a key can be proven rather than assumed."""
+        search = _search_or_503()
+        query = body.query.strip()
+        if not query:
+            raise HTTPException(status_code=400, detail="Enter something to "
+                                                        "search for.")
+        try:
+            results = await search.search(query, provider=body.provider,
+                                        limit=max(1, min(body.limit, 10)))
+        except Exception as exc:  # noqa: BLE001 - the page shows the reason
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"provider": body.provider or search.active(),
+                "results": [{"title": r.title, "url": r.url,
+                            "snippet": r.snippet} for r in results]}
 
     if service is not None:
         install_auth_routes(app, settings, service)

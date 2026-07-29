@@ -26,6 +26,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 PrivilegesRequired=lowest
 UninstallDisplayName={#AppName}
+; The app's mark, for the installer window and the Add/Remove Programs entry.
+SetupIconFile={#SourcePath}\..\..\jarvis\desktop_app\assets\ker.ico
+UninstallDisplayIcon={app}\KER.exe
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"

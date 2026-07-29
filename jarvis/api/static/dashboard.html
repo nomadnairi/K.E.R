@@ -593,7 +593,7 @@
               <div class="chip"><div class="ck">Uptime</div><div class="cv" id="ifUp">—</div></div>
               <div class="chip"><div class="ck">Сессии</div><div class="cv" id="ifSess">—</div></div>
               <div class="chip"><div class="ck">Режим</div><div class="cv" id="ifMode">—</div></div>
-              <div class="chip"><div class="ck">Версия</div><div class="cv">v<span id="homeVer">1.10.0</span></div></div>
+              <div class="chip"><div class="ck">Версия</div><div class="cv">v<span id="homeVer">1.11.0</span></div></div>
             </div>
           </div>
         </div>
@@ -677,13 +677,13 @@
       <div class="card" style="max-width:520px"><div class="body" style="text-align:center; padding:32px">
         <div style="font-size:40px">🛡</div><div id="aboutName" style="font-weight:800; letter-spacing:.4em; font-size:22px; margin-top:12px">KER</div>
         <div style="color:var(--dim); font-size:13px; margin-top:6px">Personal AI Assistant</div>
-        <div style="color:var(--muted); font-family:var(--mono); margin-top:14px">Версия 1.10.0</div>
+        <div style="color:var(--muted); font-family:var(--mono); margin-top:14px">Версия 1.11.0</div>
         <div style="color:var(--dim); font-size:12px; margin-top:18px">Провайдер-независимый ассистент · MCP · тарифы · Telegram · десктоп</div>
       </div></div>
     </section>
   </div>
 
-  <div class="statusbar"><span><b id="sbName">KER</b> <b>1.10.0</b></span><span>Python <b id="sbPy">—</b></span><span>API <b id="sbApi">—</b></span><span>CPU <b id="sbCpu">—</b></span><span>Память <b id="sbMem">—</b></span><span>Сессии <b id="sbSess">—</b></span><span class="sp" id="sbClock">--:--:--</span></div>
+  <div class="statusbar"><span><b id="sbName">KER</b> <b>1.11.0</b></span><span>Python <b id="sbPy">—</b></span><span>API <b id="sbApi">—</b></span><span>CPU <b id="sbCpu">—</b></span><span>Память <b id="sbMem">—</b></span><span>Сессии <b id="sbSess">—</b></span><span class="sp" id="sbClock">--:--:--</span></div>
 </div>
 
 <script>
@@ -960,7 +960,7 @@
     <div class="set-row"><div class="d">Меняется в <code>.env</code> сервера. Здесь показано реальное состояние.</div></div>
   </div></div>`;};
   P.updates=()=>`<div class="card"><header><h3>Обновления</h3></header><div class="body">
-    <div class="set-row"><div><div class="t">Текущая версия</div><div class="d">Установленная сборка</div></div><code id="updCur">1.10.0</code></div>
+    <div class="set-row"><div><div class="t">Текущая версия</div><div class="d">Установленная сборка</div></div><code id="updCur">1.11.0</code></div>
     <div class="set-row"><div><div class="t">Последняя версия</div><div class="d" id="updChan">Канал: ранний доступ</div></div><span id="updLatest" class="tag">—</span></div>
     <div class="set-row"><div><div class="t">Автообновление</div><div class="d" id="updAutoHint">Обновляться сразу, как выходит релиз</div></div>
       <button class="toggle" id="updAutoTog" aria-pressed="false" onclick="toggleAuto(this)"></button></div>
@@ -1028,7 +1028,7 @@
   }
   function renderUpd(){
     const u=UPD||{};const box=$("updBox");
-    $("updCur").textContent=u.current||"1.10.0";
+    $("updCur").textContent=u.current||"1.11.0";
     $("updLatest").textContent=u.latest||"—";
     $("updLatest").className="tag "+(u.available?"pop":"");
     $("updChan").textContent="Канал: "+({early:"ранний доступ",stable:"стабильные",off:"выключено"}[u.channel_mode]||u.channel_mode||"—");

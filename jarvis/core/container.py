@@ -83,8 +83,28 @@ class ServiceContainer:
         return MemoryManager.from_settings(self._settings, llm=self.llm)
 
     @cached_property
+    def search(self):
+        """Web search, shared by the AI's tool and the settings screen.
+
+        One instance, so what a person configures and tests is exactly what the
+        assistant will use.
+        """
+        if not self._settings.search_enabled:
+            return None
+        from jarvis.search.manager import SearchManager
+        return SearchManager.from_settings(self._settings)
+
+    @cached_property
+    def confirmations(self):
+        """Carries "may I?" questions to whichever interface is watching."""
+        from jarvis.security.confirm import ConfirmationBroker
+        return ConfirmationBroker(
+            timeout=self._settings.confirm_timeout_seconds)
+
+    @cached_property
     def security(self) -> SecurityManager:
-        return SecurityManager.from_settings(self._settings)
+        return SecurityManager.from_settings(self._settings,
+                                            confirmer=self.confirmations)
 
     @cached_property
     def files(self):
@@ -200,11 +220,9 @@ class ServiceContainer:
             registry.register_many(desktop_skills(DesktopController(self.security)))
         # Expose the web-search tool (gated by SEARCH_ENABLED; keyless
         # DuckDuckGo fallback means it works even with no API keys).
-        if self._settings.search_enabled:
-            from jarvis.search.manager import SearchManager
+        if self.search is not None:
             from jarvis.search.tools import search_skills
-            registry.register_many(
-                search_skills(SearchManager.from_settings(self._settings)))
+            registry.register_many(search_skills(self.search))
         # Expose the run_agent tool (delegating to an autonomous sub-agent).
         if self._settings.agents_enabled:
             from jarvis.agents.tools import RunAgentSkill

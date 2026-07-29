@@ -169,6 +169,18 @@ class Settings(BaseSettings):
     allow_file_write: bool = False
     allow_shell: bool = False
     allow_desktop_control: bool = False
+    #: Ask before each use of a capability that is otherwise allowed. This is
+    #: the middle ground between refusing a power outright and handing it over:
+    #: the assistant may use it, but every single time it stops and asks. Has
+    #: no effect on a capability that is switched off.
+    confirm_file_read: bool = False
+    confirm_file_write: bool = False
+    confirm_shell: bool = False
+    confirm_desktop_control: bool = False
+    #: Speak the question aloud and accept a spoken yes/no (needs voice).
+    confirm_by_voice: bool = False
+    #: How long to wait for an answer before refusing, in seconds.
+    confirm_timeout_seconds: float = Field(default=60.0, gt=1.0, le=600.0)
     #: Audit log file for dangerous-capability attempts ("" disables it).
     audit_log_path: str = "logs/audit.log"
 

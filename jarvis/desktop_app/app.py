@@ -361,9 +361,15 @@ def run_app() -> int:
         # -- system tray ------------------------------------------------------
 
         def _tray_icon(self):
+            """The app's own mark, with a drawn fallback if it is missing."""
             from PySide6.QtCore import Qt
             from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPixmap
+
+            from jarvis.desktop_app.assets import icon_path
             from jarvis.desktop_app.theme import THEMES
+            path = icon_path()
+            if path is not None:
+                return QIcon(str(path))
             accent = THEMES.get(config.theme, THEMES["obsidian"])["accent"]
             pix = QPixmap(64, 64)
             pix.fill(Qt.GlobalColor.transparent)
@@ -525,12 +531,17 @@ def run_app() -> int:
         #: Saving one of these changes what the engine *is*, so it is rebuilt.
         ENGINE_FIELDS = frozenset({
             "assistant_name", "language", "llm_provider", "llm_model",
-            "anthropic_api_key", "openai_api_key", "allow_file_read",
+            "anthropic_api_key", "openai_api_key", "openrouter_api_key",
+            "local_llm_base_url", "local_llm_api_key", "allow_file_read",
             "allow_file_write", "allow_shell", "allow_desktop_control",
+            "confirm_file_read", "confirm_file_write", "confirm_shell",
+            "confirm_desktop_control", "confirm_by_voice",
             "workspace_root", "voice_enabled", "voice_replies", "stt_backend",
             "tts_backend", "tts_voice", "weather_enabled", "homeassistant_url",
             "homeassistant_token", "telegram_bot_token",
-            "telegram_send_enabled", "telegram_channel",
+            "telegram_send_enabled", "telegram_channel", "search_enabled",
+            "search_provider", "tavily_api_key", "exa_api_key",
+            "brave_api_key", "perplexity_api_key", "serpapi_key",
         })
 
         def on_settings_changed(self, changed: set[str]) -> None:
@@ -698,7 +709,11 @@ def run_app() -> int:
                 api, key = self._deck_conn()
                 js = f"applyTheme({config.theme!r},{{persist:false}});"
                 if api or key:
-                    js += f"CFG.api={api!r};CFG.key={key!r};loadState();refreshVoice();"
+                    # connectWS matters as much as loadState: without it the
+                    # deck reads the engine once and then shows a frozen
+                    # snapshot — and never hears a permission question.
+                    js += (f"CFG.api={api!r};CFG.key={key!r};"
+                        "loadState();connectWS();refreshVoice();")
                 view.page().runJavaScript(js)
                 self._deck_ready = True
                 self._flush_greeting()
@@ -715,8 +730,12 @@ def run_app() -> int:
             if view is None:
                 return
             api, key = self._deck_conn()
+            # The old socket points at the engine that just went away, so it is
+            # closed and reopened against the new one.
             view.page().runJavaScript(
-                f"CFG.api={api!r};CFG.key={key!r};loadState();refreshVoice();")
+                f"CFG.api={api!r};CFG.key={key!r};"
+                "if(WS){try{WS.close();}catch(e){}WS=null;}"
+                "loadState();connectWS();refreshVoice();")
 
         def _open_deck_browser(self) -> None:
             import tempfile
@@ -1421,6 +1440,13 @@ def run_app() -> int:
     app.setStyle("Fusion")
     app.setFont(QFont("Segoe UI", 10))
     app.setStyleSheet(stylesheet(config.theme))
+    # Set once on the application so every window — the sign-in screen
+    # included — carries the mark, not just the main one.
+    from jarvis.desktop_app.assets import icon_path as _icon_path
+    _icon = _icon_path()
+    if _icon is not None:
+        from PySide6.QtGui import QIcon
+        app.setWindowIcon(QIcon(str(_icon)))
 
     #: Filled in once the window exists, so saves made from the interface
     #: reach the app that has to act on them.

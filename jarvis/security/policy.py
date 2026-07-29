@@ -17,6 +17,36 @@ class Capability(str, Enum):
     NETWORK = "network"
 
 
+class CapabilityMode(str, Enum):
+    """How far a capability is trusted.
+
+    ``ASK`` is the useful middle: the power is available, but every use stops
+    and asks first — so a capability can be granted without being handed over
+    unconditionally.
+    """
+
+    OFF = "off"     # refused outright
+    ASK = "ask"     # allowed only when the user says yes, every time
+    ON = "on"       # allowed silently
+
+    @classmethod
+    def coerce(cls, value: "CapabilityMode | str | bool") -> "CapabilityMode":
+        """Read a mode from a mode, its name, or a plain on/off flag.
+
+        Callers configured with booleans keep working: ``True`` is ``ON``.
+        Anything unrecognised becomes ``OFF`` — an unreadable setting must
+        never widen what the assistant may do.
+        """
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, bool):
+            return cls.ON if value else cls.OFF
+        try:
+            return cls(str(value).strip().lower())
+        except ValueError:
+            return cls.OFF
+
+
 @dataclass
 class AuditRecord:
     """A single audited action attempt."""

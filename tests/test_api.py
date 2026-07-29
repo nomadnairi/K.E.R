@@ -298,3 +298,140 @@ def test_cors_can_be_narrowed_to_named_origins():
             "https://deck.example"
         blocked = c.get("/health", headers={"Origin": "https://evil.example"})
         assert "access-control-allow-origin" not in blocked.headers
+
+
+# -- memory, search and permission questions over the API -------------------
+
+def _memory_app(tmp_path):
+    """An app with real memory behind it (hashing embedder, no network)."""
+    settings = Settings(
+        anthropic_api_key="k", log_file="", memory_enabled=True,
+        memory_backend="sqlite", memory_db_path=str(tmp_path / "m.db"),
+        embedding_backend="hashing",
+        integrations_enabled=False, goals_enabled=False,
+        rate_limit_enabled=False, api_key="",
+    )
+    engine = JarvisEngine(container=ServiceContainer(
+        settings, llm_client=LLMClient(primary=FakeProvider())))
+    return engine, create_app(engine=engine, settings=settings)
+
+
+def test_memory_can_be_listed_and_forgotten(tmp_path):
+    import asyncio
+    engine, app = _memory_app(tmp_path)
+    asyncio.run(engine.memory.remember("default", "Меня зовут Сержод",
+                                       kind="fact"))
+    with TestClient(app) as c:
+        listing = c.get("/dashboard/memory").json()
+        assert listing["can_browse"] is True
+        assert listing["stats"]["memories"] == 1
+        item = listing["items"][0]
+        assert item["content"] == "Меня зовут Сержод"
+
+        assert c.delete(f"/dashboard/memory/{item['id']}").status_code == 200
+        assert c.get("/dashboard/memory").json()["items"] == []
+        # Forgetting the same thing twice is a 404, not a silent success.
+        assert c.delete(f"/dashboard/memory/{item['id']}").status_code == 404
+
+
+def test_memory_search_uses_real_recall(tmp_path):
+    import asyncio
+    engine, app = _memory_app(tmp_path)
+    asyncio.run(engine.memory.remember("default", "Я живу в Ташкенте",
+                                       kind="fact"))
+    with TestClient(app) as c:
+        # Russian must work at all — it used to return nothing whatsoever.
+        # The default embedder is bag-of-words, so the query shares words with
+        # the memory rather than being a synonym for it.
+        found = c.get("/dashboard/memory/search",
+                      params={"q": "где я живу"}).json()
+        assert any("Ташкенте" in i["content"] for i in found["items"])
+        assert c.get("/dashboard/memory/search",
+                     params={"q": "  "}).json()["items"] == []
+
+
+def test_forget_everything_clears_memory(tmp_path):
+    import asyncio
+    engine, app = _memory_app(tmp_path)
+    asyncio.run(engine.memory.remember("default", "что-то", kind="fact"))
+    with TestClient(app) as c:
+        out = c.post("/dashboard/memory/forget", json={"everything": True})
+        assert out.status_code == 200
+        assert out.json()["stats"]["memories"] == 0
+
+
+def test_memory_endpoints_say_so_when_memory_is_off():
+    with TestClient(_app()) as c:      # the default app has memory disabled
+        assert c.get("/dashboard/memory").status_code == 503
+
+
+def test_search_providers_report_real_availability():
+    with TestClient(_app()) as c:
+        out = c.get("/dashboard/search/providers").json()
+        names = {p["name"] for p in out["providers"]}
+        assert "duckduckgo" in names
+        keyless = next(p for p in out["providers"] if p["name"] == "duckduckgo")
+        assert keyless["requires_key"] is False
+        assert keyless["available"] is True
+        # A provider with no key configured must not claim to be usable.
+        keyed = [p for p in out["providers"] if p["requires_key"]]
+        assert all(p["available"] is False for p in keyed)
+
+
+def test_search_test_needs_something_to_search_for():
+    with TestClient(_app()) as c:
+        assert c.post("/dashboard/search/test",
+                      json={"query": "   "}).status_code == 400
+
+
+def test_pending_permission_questions_are_visible_and_answerable():
+    """The interface must be able to see the question and answer it."""
+    import threading
+    import time
+
+    from jarvis.security.policy import Capability
+    settings = Settings(anthropic_api_key="k", log_file="", audit_log_path="",
+                        memory_enabled=False, integrations_enabled=False,
+                        goals_enabled=False, rate_limit_enabled=False,
+                        allow_shell=True, confirm_shell=True)
+    engine = JarvisEngine(container=ServiceContainer(
+        settings, llm_client=LLMClient(primary=FakeProvider())))
+    app = create_app(engine=engine, settings=settings)
+    broker = engine.security.confirmer
+    answers: list[bool] = []
+    threading.Thread(
+        target=lambda: answers.append(
+            broker.request(Capability.SHELL_EXEC, "echo hi")),
+        daemon=True).start()
+    while not broker.pending():
+        time.sleep(0.01)
+
+    with TestClient(app) as c:
+        pending = c.get("/dashboard/confirmations").json()["pending"]
+        assert pending and pending[0]["action"] == "echo hi"
+        assert c.get("/dashboard/state").json()["confirmations"]
+        ok = c.post("/dashboard/confirm",
+                    json={"id": pending[0]["id"], "allow": True})
+        assert ok.status_code == 200
+        # Answering it again fails loudly rather than pretending.
+        assert c.post("/dashboard/confirm",
+                      json={"id": pending[0]["id"], "allow": True}
+                      ).status_code == 404
+    for _ in range(200):
+        if answers:
+            break
+        time.sleep(0.01)
+    assert answers == [True]
+
+
+def test_state_reports_the_capability_modes():
+    settings = Settings(anthropic_api_key="k", log_file="", audit_log_path="",
+                        memory_enabled=False, integrations_enabled=False,
+                        goals_enabled=False, rate_limit_enabled=False,
+                        allow_file_write=True, confirm_file_write=True)
+    engine = JarvisEngine(container=ServiceContainer(
+        settings, llm_client=LLMClient(primary=FakeProvider())))
+    with TestClient(create_app(engine=engine, settings=settings)) as c:
+        modes = c.get("/dashboard/state").json()["security"]["modes"]
+        assert modes["file_write"] == "ask"
+        assert modes["shell_exec"] == "off"
