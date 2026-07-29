@@ -70,13 +70,34 @@ class AppConfig:
     llm_model: str = ""
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    openrouter_api_key: str = ""
+    #: Local model server (Ollama, LM Studio, vLLM, llama.cpp) — no cloud key.
+    local_llm_base_url: str = ""
+    local_llm_api_key: str = ""
 
     # -- local mode: granular PC capabilities (all dangerous ones OFF) --------
     allow_file_read: bool = True
     allow_file_write: bool = False
     allow_shell: bool = False
     allow_desktop_control: bool = False
+    #: Ask before each use of a capability that is otherwise allowed.
+    confirm_file_read: bool = False
+    confirm_file_write: bool = False
+    confirm_shell: bool = False
+    confirm_desktop_control: bool = False
+    #: Speak the question and accept a spoken answer.
+    confirm_by_voice: bool = False
     workspace_root: str = ""
+
+    # -- web search -----------------------------------------------------------
+    search_enabled: bool = True
+    #: "auto" picks the best available provider by priority.
+    search_provider: str = "auto"
+    tavily_api_key: str = ""
+    exa_api_key: str = ""
+    brave_api_key: str = ""
+    perplexity_api_key: str = ""
+    serpapi_key: str = ""
 
     # -- integrations ---------------------------------------------------------
     weather_enabled: bool = True
@@ -133,10 +154,24 @@ class AppConfig:
             "llm_provider": self.llm_provider,
             "anthropic_api_key": self.anthropic_api_key,
             "openai_api_key": self.openai_api_key,
+            "openrouter_api_key": self.openrouter_api_key,
+            "local_llm_api_key": self.local_llm_api_key,
             "allow_file_read": self.allow_file_read,
             "allow_file_write": self.allow_file_write,
             "allow_shell": self.allow_shell,
             "allow_desktop_control": self.allow_desktop_control,
+            "confirm_file_read": self.confirm_file_read,
+            "confirm_file_write": self.confirm_file_write,
+            "confirm_shell": self.confirm_shell,
+            "confirm_desktop_control": self.confirm_desktop_control,
+            "confirm_by_voice": self.confirm_by_voice,
+            "search_enabled": self.search_enabled,
+            "search_provider": self.search_provider,
+            "tavily_api_key": self.tavily_api_key,
+            "exa_api_key": self.exa_api_key,
+            "brave_api_key": self.brave_api_key,
+            "perplexity_api_key": self.perplexity_api_key,
+            "serpapi_key": self.serpapi_key,
             "weather_enabled": self.weather_enabled,
             "homeassistant_url": self.homeassistant_url,
             "homeassistant_token": self.homeassistant_token,
@@ -153,7 +188,14 @@ class AppConfig:
         if self.assistant_name:
             overrides["assistant_name"] = self.assistant_name
         if self.llm_model:
-            overrides["llm_model"] = self.llm_model
+            # Each provider reads its own model field, so point the right one
+            # at what the user typed.
+            key = {"openrouter": "openrouter_model",
+                "local": "local_llm_model"}.get(self.llm_provider,
+                                                    "llm_model")
+            overrides[key] = self.llm_model
+        if self.local_llm_base_url:
+            overrides["local_llm_base_url"] = self.local_llm_base_url
         if self.workspace_root:
             overrides["workspace_root"] = self.workspace_root
         return overrides

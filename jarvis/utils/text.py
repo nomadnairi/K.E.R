@@ -20,9 +20,19 @@ def truncate(text: str, max_chars: int = 120, suffix: str = "…") -> str:
     return text[: max_chars - len(suffix)].rstrip() + suffix
 
 
+#: Word characters in any alphabet. ``\w`` is Unicode-aware in Python 3, so
+#: this keeps Cyrillic and every other script; an ASCII-only pattern silently
+#: turned Russian text into no tokens at all, which left semantic memory
+#: unable to recall anything a Russian-speaking user told it.
+_WORD_RE = re.compile(r"[^\W_]+(?:'[^\W_]+)*", re.UNICODE)
+
+
 def tokenize_words(text: str) -> list[str]:
-    """Return lowercase word tokens (letters/digits) from ``text``."""
-    return re.findall(r"[a-zA-Z0-9']+", text.lower())
+    """Return lowercase word tokens (letters/digits) from ``text``.
+
+    Works in any alphabet, not just Latin.
+    """
+    return _WORD_RE.findall(text.lower())
 
 
 def strip_wake_word(text: str, wake_words: tuple[str, ...]) -> str:

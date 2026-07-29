@@ -29,6 +29,9 @@ a = Analysis(
         ("../../jarvis/api/static/desktop.html", "jarvis/api/static"),
         ("../../jarvis/api/static/desktop_login.html", "jarvis/api/static"),
         ("../../jarvis/api/static/dashboard.html", "jarvis/api/static"),
+        # The app's mark, used for the window and the tray at runtime.
+        ("../../jarvis/desktop_app/assets/ker.ico", "jarvis/desktop_app/assets"),
+        ("../../jarvis/desktop_app/assets/ker.png", "jarvis/desktop_app/assets"),
     ],
     hiddenimports=[
         "jarvis.desktop_app.app",
@@ -74,6 +77,9 @@ exe = EXE(
     a.datas,
     name=name,
     console=False,
-    icon=None,
+    # Baked into the binary, so Windows Explorer and the taskbar show the mark
+    # even before the app has started.
+    icon=str(Path(SPECPATH).resolve().parents[1]
+            / "jarvis" / "desktop_app" / "assets" / "ker.ico"),
     upx=False,
 )

@@ -34,6 +34,9 @@ CHOICES: dict[str, tuple[str, ...]] = {
     "language": ("en", "ru", "uz"),
     "theme": tuple(THEMES),
     "llm_provider": ("anthropic", "openai", "openrouter", "local"),
+    # "auto" lets the engine pick the best key you actually have.
+    "search_provider": ("auto", "duckduckgo", "tavily", "exa", "brave",
+                        "google", "serpapi", "perplexity", "playwright"),
     "update_channel": ("early", "stable"),
     # Kept in step with jarvis.config.settings, which only accepts these.
     "stt_backend": ("openai", "local"),
@@ -50,17 +53,33 @@ WRITABLE: dict[str, type] = {
     "start_on_boot": bool,
     # assistant
     "assistant_name": str,
-    # AI
+    # AI — one field per provider the engine can actually talk to
     "llm_provider": str,
     "llm_model": str,
     "anthropic_api_key": str,
     "openai_api_key": str,
-    # capabilities
+    "openrouter_api_key": str,
+    "local_llm_base_url": str,
+    "local_llm_api_key": str,
+    # capabilities: allowed at all, and whether each use is confirmed first
     "allow_file_read": bool,
     "allow_file_write": bool,
     "allow_shell": bool,
     "allow_desktop_control": bool,
+    "confirm_file_read": bool,
+    "confirm_file_write": bool,
+    "confirm_shell": bool,
+    "confirm_desktop_control": bool,
+    "confirm_by_voice": bool,
     "workspace_root": str,
+    # web search
+    "search_enabled": bool,
+    "search_provider": str,
+    "tavily_api_key": str,
+    "exa_api_key": str,
+    "brave_api_key": str,
+    "perplexity_api_key": str,
+    "serpapi_key": str,
     # voice
     "voice_enabled": bool,
     "voice_replies": bool,
@@ -80,8 +99,10 @@ WRITABLE: dict[str, type] = {
 }
 
 #: Fields whose value must never be handed back to the page.
-SECRETS = ("anthropic_api_key", "openai_api_key", "homeassistant_token",
-           "telegram_bot_token", "auth_token")
+SECRETS = ("anthropic_api_key", "openai_api_key", "openrouter_api_key",
+           "local_llm_api_key", "homeassistant_token", "telegram_bot_token",
+           "tavily_api_key", "exa_api_key", "brave_api_key",
+           "perplexity_api_key", "serpapi_key", "auth_token")
 
 #: Where the app looks for its log, most interesting first.
 LOG_CANDIDATES = ("logs/jarvis.log", "logs/audit.log")

@@ -190,7 +190,47 @@ class SQLiteVectorStore(BaseMemoryStore):
                 )
             self._conn.commit()
 
+    def delete(self, record_id: int) -> bool:
+        """Remove one memory by id."""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM memories WHERE id = ?",
+                                    (int(record_id),))
+            self._conn.commit()
+        return cur.rowcount > 0
+
     # -- introspection ------------------------------------------------------
+
+    def browse(self, *, session_id: str | None = None, limit: int = 100,
+            offset: int = 0) -> list[MemoryRecord]:
+        """Stored memories, newest first — what a person is actually shown."""
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+        sql = "SELECT * FROM memories"
+        params: tuple = ()
+        if session_id is not None:
+            sql += " WHERE session_id = ?"
+            params = (session_id,)
+        sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
+        with self._lock:
+            rows = self._conn.execute(sql, (*params, limit, offset)).fetchall()
+        out: list[MemoryRecord] = []
+        for row in rows:
+            try:
+                ts = datetime.fromisoformat(row["timestamp"])
+            except ValueError:
+                ts = datetime.now(timezone.utc)
+            out.append(MemoryRecord(
+                content=row["content"],
+                session_id=row["session_id"],
+                kind=row["kind"],
+                timestamp=ts,
+                metadata=json.loads(row["metadata"]),
+                record_id=int(row["id"]),
+            ))
+        return out
+
+    def can_browse(self) -> bool:
+        return True
 
     def count(self, session_id: str | None = None) -> int:
         with self._lock:
