@@ -38,15 +38,21 @@ def test_create_account_and_duplicate(svc: LicenseService):
         svc.create_account("tony", "other")
 
 
-def test_authenticate_requires_license(svc: LicenseService):
+def test_a_licence_is_not_needed_to_sign_in(svc: LicenseService):
+    """Free users have to get in — the licence decides the tier, not entry."""
     acc = svc.create_account("bruce", "hulk")
-    # No license yet → auth fails even with the right password.
-    with pytest.raises(AuthError):
-        svc.authenticate("bruce", "hulk")
-    svc.issue_license(acc.id)
     assert svc.authenticate("bruce", "hulk").id == acc.id
+    # The password still has to be right.
     with pytest.raises(AuthError):
         svc.authenticate("bruce", "nope")
+
+
+def test_a_licence_can_be_demanded_when_the_operator_wants_it(svc: LicenseService):
+    acc = svc.create_account("bruce", "hulk")
+    with pytest.raises(AuthError):
+        svc.authenticate("bruce", "hulk", require_license=True)
+    svc.issue_license(acc.id)
+    assert svc.authenticate("bruce", "hulk", require_license=True).id == acc.id
 
 
 def test_disabled_account_cannot_login(svc: LicenseService):

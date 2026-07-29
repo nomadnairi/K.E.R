@@ -17,6 +17,10 @@ from jarvis.desktop_app.config import AppConfig
 class FakeClient:
     """Stands in for a server: records the calls, hands back a token."""
 
+    #: What /auth/me should answer. Tests override it per case.
+    profile: dict = {"username": "ann", "owner": False, "tier": "free",
+                     "features": ["chat", "memory"]}
+
     def __init__(self, base_url: str, *, token: str = "") -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
@@ -36,6 +40,17 @@ class FakeClient:
         self.token = "token-tg"
         return self.token
 
+    def me(self) -> dict:
+        self.calls.append(("me",))
+        return dict(self.profile)
+
+
+class UnreachableClient(FakeClient):
+    """A server that answers the login but is gone by the time we ask again."""
+
+    def me(self) -> dict:
+        raise ApiError(0, "Cannot reach server")
+
 
 @pytest.fixture()
 def bridge(tmp_path):
@@ -54,22 +69,22 @@ def test_unknown_action_is_refused(bridge):
 
 # -- signing in -------------------------------------------------------------
 
-def test_local_mode_makes_this_machine_the_owner(bridge, tmp_path):
-    out = bridge.handle("login.local")
-    assert out == {"ok": True, "mode": "local", "role": "admin"}
-    assert bridge.signed_in is True
-    saved = AppConfig.load(tmp_path)
-    assert (saved.mode, saved.role, saved.mode_chosen) == ("local", "admin", True)
+def test_there_is_no_way_in_but_an_account(bridge):
+    """Signing in is the only way in — the owner included."""
+    assert bridge.handle("login.local")["ok"] is False
 
 
-def test_password_sign_in_stores_the_token(bridge, tmp_path):
+def test_password_sign_in_stores_the_token_and_the_plan(bridge, tmp_path):
     out = bridge.handle("login.password", {"server": "http://localhost:8000",
                                            "username": "ann",
                                            "password": "secret"})
-    assert out["ok"] is True and out["role"] == "user"
+    assert out["ok"] is True and out["tier"] == "free"
     saved = AppConfig.load(tmp_path)
     assert saved.auth_token == "token-123"
     assert saved.username == "ann"
+    assert saved.plan_features == ["chat", "memory"]
+    assert saved.role == "user"
+    # Free has no local capabilities, so the engine is the server's.
     assert saved.mode == "remote"
 
 
@@ -228,3 +243,88 @@ def test_a_silly_line_count_is_brought_back_into_range(bridge, tmp_path):
     log.write_text("\n".join(str(i) for i in range(5000)), encoding="utf-8")
     assert len(bridge.handle("logs.tail", {"lines": 99999})["lines"]) == 2000
     assert len(bridge.handle("logs.tail", {"lines": "nonsense"})["lines"]) == 300
+
+
+# -- the subscription decides what the app is -------------------------------
+
+def test_the_owner_gets_everything_and_the_admin_role(tmp_path):
+    class OwnerClient(FakeClient):
+        profile = {"username": "boss", "owner": True, "tier": "pro",
+                   "features": ["chat", "memory", "pc_access", "local_ai"]}
+
+    config = AppConfig(anthropic_api_key="sk-test")
+    bridge = Bridge(config, client_factory=OwnerClient, config_dir=tmp_path)
+    out = bridge.handle("login.password", {"server": "http://localhost:8000",
+                                           "username": "boss",
+                                           "password": "secret"})
+    assert out["owner"] is True
+    saved = AppConfig.load(tmp_path)
+    assert saved.role == "admin"
+    assert saved.is_owner is True
+    # Local capabilities plus a key: the engine belongs on this machine.
+    assert saved.mode == "local"
+    assert saved.has("pc_access") is True
+
+
+def test_a_plan_without_local_powers_uses_the_server(tmp_path):
+    config = AppConfig(anthropic_api_key="sk-test")   # key present…
+    bridge = Bridge(config, client_factory=FakeClient, config_dir=tmp_path)
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                     "username": "ann", "password": "secret"})
+    # …but Free is not entitled to run anything locally.
+    assert config.may_run_locally() is False
+    assert config.mode == "remote"
+
+
+def test_local_powers_still_need_a_model_to_talk_to(tmp_path):
+    class ProClient(FakeClient):
+        profile = {"username": "pat", "owner": False, "tier": "pro",
+                   "features": ["chat", "pc_access", "local_ai"]}
+
+    config = AppConfig()                     # entitled, but no key anywhere
+    bridge = Bridge(config, client_factory=ProClient, config_dir=tmp_path)
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                     "username": "pat", "password": "secret"})
+    assert config.may_run_locally() is False
+    assert config.mode == "remote"
+
+
+def test_an_unreachable_server_keeps_the_plan_you_had(tmp_path):
+    """Losing the network must not silently demote a paying user."""
+    config = AppConfig(plan_tier="pro", plan_features=["chat", "pc_access"],
+                       is_owner=False)
+    bridge = Bridge(config, client_factory=UnreachableClient,
+                    config_dir=tmp_path)
+    out = bridge.handle("login.password", {"server": "http://localhost:8000",
+                                           "username": "pat",
+                                           "password": "secret"})
+    assert out["ok"] is True                 # the login itself worked
+    assert config.plan_tier == "pro"         # cached plan survives
+    assert config.plan_features == ["chat", "pc_access"]
+
+
+def test_plan_get_reports_whether_it_is_live_or_cached(tmp_path):
+    config = AppConfig()
+    bridge = Bridge(config, client_factory=FakeClient, config_dir=tmp_path)
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                     "username": "ann", "password": "secret"})
+    live = bridge.handle("plan.get")
+    assert live["ok"] is True and live["live"] is True
+    assert live["tier"] == "free"
+
+    bridge.client = UnreachableClient("http://localhost:8000")
+    cached = bridge.handle("plan.get")
+    assert cached["live"] is False            # honest about being stale
+    assert cached["tier"] == "free"           # but still knows the plan
+
+
+def test_the_page_cannot_promote_itself(tmp_path):
+    """The plan comes from the server; the interface may not write it."""
+    config = AppConfig()
+    bridge = Bridge(config, config_dir=tmp_path)
+    bridge.handle("settings.save", {"settings": {"plan_tier": "pro",
+                                                 "is_owner": True,
+                                                 "plan_features": ["pc_access"]}})
+    assert config.plan_tier == "free"
+    assert config.is_owner is False
+    assert config.plan_features == []

@@ -112,6 +112,8 @@ def test_admin_revoke_license(admin_env, capsys):
             if line.startswith("Key (shown once):"))
     assert admin_main(["revoke-license", key]) == 0
     svc = LicenseService(str(admin_env))
+    # Revoking takes the plan away, not the account: they drop to Free.
+    assert svc.has_active_license(svc.get_account("rhodey").id) is False
     with pytest.raises(Exception):
-        svc.authenticate("rhodey", "warmachine")
+        svc.authenticate("rhodey", "warmachine", require_license=True)
     svc.close()

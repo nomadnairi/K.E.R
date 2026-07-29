@@ -59,11 +59,23 @@ class AppConfig:
     #: not put in front of a local owner on every launch.
     mode_chosen: bool = False
 
-    # -- remote mode ----------------------------------------------------------
+    # -- account --------------------------------------------------------------
     server_url: str = ""
     #: Login token from /auth/login (stored so you stay signed in).
     auth_token: str = ""
     username: str = ""
+
+    # -- subscription (cached from the server) --------------------------------
+    # Kept on disk so the app still opens, and still knows what it may show,
+    # when the server cannot be reached. Refreshed on every successful start.
+    #: free | plus | pro
+    plan_tier: str = "free"
+    #: Capability names unlocked by that tier (see jarvis.billing.entitlements).
+    plan_features: list = field(default_factory=list)
+    #: The operator's own account — everything unlocked, nothing counted.
+    is_owner: bool = False
+    #: When the plan was last confirmed by the server (unix seconds).
+    plan_checked_at: float = 0.0
 
     # -- local mode: LLM ------------------------------------------------------
     llm_provider: str = "anthropic"
@@ -145,6 +157,31 @@ class AppConfig:
         except OSError:  # pragma: no cover - platform specific
             pass
         return path
+
+    # -- where the engine runs ------------------------------------------------
+
+    def may_run_locally(self) -> bool:
+        """Whether this account is entitled to an engine on this machine.
+
+        Local powers — files, shell, a local model, MCP — only exist where the
+        engine runs, and an engine needs a model to talk to. Tiers without those
+        capabilities use the operator's server instead, which is also where
+        their allowance is counted.
+        """
+        from jarvis.billing.entitlements import LOCAL_AI, PC_ACCESS
+        entitled = self.is_owner or bool(
+            {PC_ACCESS, LOCAL_AI} & set(self.plan_features))
+        has_brain = bool(self.anthropic_api_key or self.openai_api_key
+                        or self.openrouter_api_key or self.local_llm_base_url)
+        return entitled and has_brain
+
+    def resolved_mode(self) -> str:
+        """"local" when the engine runs here, "remote" when it is the server's."""
+        return "local" if self.may_run_locally() else "remote"
+
+    def has(self, feature: str) -> bool:
+        """Whether the account's plan includes ``feature``."""
+        return self.is_owner or feature in self.plan_features
 
     # -- engine bridge --------------------------------------------------------
 

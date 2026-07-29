@@ -542,6 +542,40 @@ def create_app(engine: JarvisEngine | None = None,
                 pass
         return {"connected": True, "server": cfg.name, "tools": len(skills)}
 
+    # -- who is signed in, and what their plan includes ----------------------
+
+    @app.get("/dashboard/plan")
+    async def dashboard_plan(
+            authorization: str | None = Header(default=None),
+            x_api_key: str | None = Header(default=None),
+            _: str = Depends(require_principal)) -> dict:
+        """The signed-in person's tier, limits and capabilities.
+
+        The interface asks this to decide what to show. Without accounts (a
+        private single-user server, or the owner's own machine) there is nobody
+        to bill, so the caller is the operator and gets everything.
+        """
+        from jarvis.api.auth import profile_for
+        token = None
+        if authorization and authorization.startswith("Bearer "):
+            token = authorization[len("Bearer "):]
+        token = token or x_api_key
+        account = service.validate_token(token) if (service and token) else None
+        if account is None and settings.auth_enabled:
+            raise HTTPException(status_code=401, detail="Sign in first.")
+        usage = None
+        try:
+            from jarvis.interfaces.usage import UsageStore
+            usage = UsageStore(settings.memory_db_path)
+        except Exception:  # noqa: BLE001 - usage is a nicety, not a gate
+            usage = None
+        try:
+            return profile_for(account, settings, service, usage=usage,
+                            owner=None if account is not None else True)
+        finally:
+            if usage is not None:
+                usage.close()
+
     # -- permission questions ------------------------------------------------
 
     class _ConfirmIn(BaseModel):

@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/Version-1.11.0-orange)](https://github.com/nomadnairi/K.E.R/releases)
+[![Version](https://img.shields.io/badge/Version-1.12.0-orange)](https://github.com/nomadnairi/K.E.R/releases)
 
 [English](README.md) · [Русский](README.ru.md) · **O'zbek**
 
@@ -153,10 +153,16 @@ tili yo'q. Animatsiyali reaktor bilan bosh ekran va jonli telemetriya, tarixli
 chat, modellar katalogi, xotira, MCP-serverlar, jurnal va sozlamalar — hammasi
 ichki lokal API orqali haqiqiy dvigatelga ulangan va real vaqtda yangilanadi.
 
-Kirish ham xuddi shu dizaynda, uch yo'l bilan: **shu kompyuter** (dvigatel shu
-yerda, o'z kalitlaringiz bilan), **hisob**, yoki bot bergan **Telegram kirish
-kodi**. Egasi kompyuterini to'liq boshqaradi, kirgan mehmon cheklangan
-versiyani oladi.
+Kirish ham xuddi shu dizaynda: **login va parol**, yoki bot bergan **Telegram
+kirish kodi**. Hamma bir xil kiradi, egasi ham — shunchaki uning hisobi
+hammasini ochadi.
+
+Keyin nima ko'rishingiz obunaga bog'liq. Free suhbatlashadi va eslaydi; Plus
+veb-qidiruv, ovoz, barcha modellar va rasmlarni qo'shadi; Pro esa faqat
+dvigatel sizning kompyuteringizda ishlaganda mavjud bo'lgan imkoniyatlarni:
+fayllar, terminal, kompyuterni boshqarish, MCP-serverlar va lokal modellar.
+Tarifingizga kirmagan bo'limlar yashirilmaydi — ular nima ochishini ko'rsatib
+turadi.
 
 Bu oynadagi sozlamalar haqiqiy: til, mavzu, yordamchi nomi, provayder va
 API-kalitlar, kompyuterga ruxsatlar, ovoz dvigatellari, integratsiyalar,

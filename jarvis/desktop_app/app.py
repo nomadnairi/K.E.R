@@ -140,7 +140,6 @@ def run_app() -> int:
             QMessageBox,
             QPlainTextEdit,
             QPushButton,
-            QRadioButton,
             QTabWidget,
             QTextEdit,
             QVBoxLayout,
@@ -189,16 +188,6 @@ def run_app() -> int:
             layout.addWidget(title)
             layout.addSpacing(6)
 
-            self.local_radio = QRadioButton(tr("mode_local", loc))
-            self.remote_radio = QRadioButton(tr("mode_remote", loc))
-            (self.remote_radio if config.mode == "remote"
-             else self.local_radio).setChecked(True)
-            layout.addWidget(self.local_radio)
-            local_hint = QLabel(tr("login_local_hint", loc))
-            local_hint.setObjectName("Hint")
-            local_hint.setWordWrap(True)
-            layout.addWidget(local_hint)
-            layout.addWidget(self.remote_radio)
             remote_hint = QLabel(tr("login_remote_hint", loc))
             remote_hint.setObjectName("Hint")
             remote_hint.setWordWrap(True)
@@ -219,30 +208,16 @@ def run_app() -> int:
             layout.addLayout(form)
             layout.addSpacing(8)
 
-            buttons = QHBoxLayout()
-            buttons.setSpacing(10)
             sign_in = QPushButton(tr("sign_in", loc))
             sign_in.setObjectName("Primary")
             sign_in.setMinimumHeight(44)
-            local = QPushButton(tr("continue_local", loc))
-            local.setMinimumHeight(44)
             sign_in.clicked.connect(self._sign_in)
-            local.clicked.connect(self._local)
-            buttons.addWidget(sign_in, stretch=1)
-            buttons.addWidget(local, stretch=1)
-            layout.addLayout(buttons)
+            layout.addWidget(sign_in)
 
             tg = QPushButton(tr("sign_in_telegram", loc))
             tg.setMinimumHeight(40)
             tg.clicked.connect(self._telegram_login)
             layout.addWidget(tg)
-
-        def _local(self) -> None:
-            config.mode = "local"
-            config.role = "admin"      # owner on their own machine
-            config.mode_chosen = True
-            config.save()
-            self.accept()
 
         def _telegram_login(self) -> None:
             from PySide6.QtWidgets import QInputDialog
@@ -258,11 +233,13 @@ def run_app() -> int:
                 QMessageBox.warning(self, tr("login_title", loc),
                                     tr("login_failed", loc, error=exc.detail))
                 return
-            config.mode = "remote"
-            config.role = "user"
             config.server_url = client.base_url
             config.auth_token = client.token
+            config.mode_chosen = True
             config.save()
+            # The plan decides the role and where the engine runs.
+            from jarvis.desktop_app.bridge import adopt_profile
+            adopt_profile(config, client)
             self.client = client
             self.accept()
 
@@ -275,12 +252,13 @@ def run_app() -> int:
                 QMessageBox.warning(self, tr("login_title", loc),
                                     tr("login_failed", loc, error=exc.detail))
                 return
-            config.mode = "remote"
-            config.role = "user"       # signed-in guest — limited app
             config.server_url = client.base_url
             config.username = self.user.text().strip()
             config.auth_token = client.token
+            config.mode_chosen = True
             config.save()
+            from jarvis.desktop_app.bridge import adopt_profile
+            adopt_profile(config, client)
             self.client = client
             self.accept()
 
@@ -1468,19 +1446,28 @@ def run_app() -> int:
             on_change=_on_change,
         )
 
+    # Signing in is how you get in — for the owner too. A saved token keeps you
+    # signed in; a server that cannot be reached does not lock you out of a
+    # session you already have, it just leaves the plan as last confirmed.
     client: JarvisApiClient | None = None
-    if config.mode == "remote" and config.auth_token and config.server_url:
-        # Try the saved token first; fall back to the sign-in screen.
+    if config.auth_token and config.server_url:
         candidate = JarvisApiClient(config.server_url, token=config.auth_token)
         try:
             candidate.me()
             client = candidate
-        except ApiError:
-            config.auth_token = ""
-            config.save()
+            bridge.client = candidate
+            bridge.refresh_plan(candidate)
+        except ApiError as exc:
+            if exc.status in (401, 403):
+                config.auth_token = ""      # the token really is no good
+                config.save()
+            else:                            # server down: carry on offline
+                logger.warning("Server unreachable, using the cached plan: %s",
+                            exc.detail)
+                client = candidate
+                bridge.client = candidate
 
-    # A local owner has already answered this question — don't ask every launch.
-    if client is None and not (config.mode == "local" and config.mode_chosen):
+    if client is None:
         if handler is not None:
             login = WebLoginWindow(handler)
             if login.exec() != QDialog.DialogCode.Accepted:
@@ -1491,6 +1478,7 @@ def run_app() -> int:
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return 0
             client = dialog.client
+    config.mode = config.resolved_mode()
 
     window = MainWindow(client)
     window_ref["window"] = window

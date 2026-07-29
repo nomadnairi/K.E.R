@@ -190,8 +190,19 @@ class LicenseService:
 
     # -- authentication -------------------------------------------------------
 
-    def authenticate(self, username: str, password: str) -> Account:
-        """Verify credentials and licensing; return the account or raise."""
+    def authenticate(self, username: str, password: str, *,
+                    require_license: bool = False) -> Account:
+        """Verify credentials; return the account or raise.
+
+        A licence is **not** required to sign in. There is a Free tier, and a
+        free user has to be able to get in — otherwise the only way into the
+        product is to have already paid, and nobody can see what they would be
+        buying. What a licence changes is the *tier* (see
+        :mod:`jarvis.billing.entitlements`), not whether the door opens.
+
+        ``require_license=True`` restores the stricter behaviour for a
+        deployment sold as licence-only.
+        """
         row = self._conn.execute(
             "SELECT * FROM accounts WHERE username = ?",
             (username.strip().lower(),),
@@ -203,7 +214,7 @@ class LicenseService:
         account = self._account_from_row(row)
         if not account.active:
             raise AuthError("This account is disabled.")
-        if not self.has_active_license(account.id):
+        if require_license and not self.has_active_license(account.id):
             raise AuthError("No active license for this account.")
         return account
 
