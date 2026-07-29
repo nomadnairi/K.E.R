@@ -158,17 +158,11 @@
     <div class="sub" id="subtitle"></div>
 
     <div class="tabs" role="tablist">
-      <button class="tab" role="tab" id="tab-local" aria-selected="true" onclick="pick('local')"></button>
-      <button class="tab" role="tab" id="tab-account" aria-selected="false" onclick="pick('account')"></button>
+      <button class="tab" role="tab" id="tab-account" aria-selected="true" onclick="pick('account')"></button>
       <button class="tab" role="tab" id="tab-telegram" aria-selected="false" onclick="pick('telegram')"></button>
     </div>
 
-    <section class="pane on" id="pane-local">
-      <p class="hint" id="hint-local"></p>
-      <button class="btn primary" id="go-local" onclick="startLocal(this)"><i class="spin"></i><span></span></button>
-    </section>
-
-    <section class="pane" id="pane-account">
+    <section class="pane on" id="pane-account">
       <p class="hint" id="hint-account"></p>
       <div class="field"><label id="l-server"></label><input id="server" spellcheck="false" placeholder="http://localhost:8000" /></div>
       <div class="field"><label id="l-user"></label><input id="user" spellcheck="false" autocomplete="username" /></div>
@@ -210,13 +204,10 @@
   // ---- paint the screen in the user's language ----
   text("brand", L.brand); text("title", L.title); text("subtitle", L.subtitle);
   text("tagline", L.tagline);
-  text("tab-local", L.tab_local); text("tab-account", L.tab_account);
-  text("tab-telegram", L.tab_telegram);
-  text("hint-local", L.hint_local); text("hint-account", L.hint_account);
-  text("hint-telegram", L.hint_telegram);
+  text("tab-account", L.tab_account); text("tab-telegram", L.tab_telegram);
+  text("hint-account", L.hint_account); text("hint-telegram", L.hint_telegram);
   text("l-server", L.server); text("l-server2", L.server);
   text("l-user", L.username); text("l-pass", L.password); text("l-code", L.code);
-  $("go-local").querySelector("span").textContent = L.cta_local;
   $("go-account").querySelector("span").textContent = L.cta_account;
   $("go-telegram").querySelector("span").textContent = L.cta_telegram;
   text("ver", L.version_line); text("modeNote", L.foot_note);
@@ -226,12 +217,12 @@
 
   // ---- tabs ----
   function pick(which){
-    ["local","account","telegram"].forEach(k => {
+    ["account","telegram"].forEach(k => {
       $("tab-"+k).setAttribute("aria-selected", String(k===which));
       $("pane-"+k).classList.toggle("on", k===which);
     });
     hideError();
-    const first = {local:null, account:"user", telegram:"code"}[which];
+    const first = {account:"user", telegram:"code"}[which];
     if(first) setTimeout(()=>$(first).focus(), 40);
   }
 
@@ -263,7 +254,6 @@
     showError((res && res.error) || L.failed);
   }
 
-  const startLocal = btn => run(btn, "login.local", {});
   const signIn = btn => run(btn, "login.password", {
     server: $("server").value.trim(),
     username: $("user").value.trim(),
@@ -277,10 +267,11 @@
   // Enter submits whichever way in is open.
   document.addEventListener("keydown", e => {
     if(e.key !== "Enter") return;
-    const open = ["local","account","telegram"]
+    const open = ["account","telegram"]
       .find(k => $("tab-"+k).getAttribute("aria-selected") === "true");
     $("go-"+open).click();
   });
+  setTimeout(()=>$( $("user").value ? "pass" : "user").focus(), 120);
 </script>
 </body>
 </html>

@@ -108,6 +108,34 @@ SECRETS = ("anthropic_api_key", "openai_api_key", "openrouter_api_key",
 LOG_CANDIDATES = ("logs/jarvis.log", "logs/audit.log")
 
 
+def adopt_profile(config: AppConfig, client: JarvisApiClient, *,
+                  config_dir: Path | None = None) -> dict:
+    """Store what the server says this account is, and what it may do.
+
+    Cached on disk on purpose: the app must still know what to show when the
+    server cannot be reached, and a slightly stale plan beats an empty window.
+    Ownership, role and where the engine runs are all derived from the server's
+    answer — never guessed by the interface.
+    """
+    import time
+    try:
+        profile = client.me()
+    except Exception as exc:  # noqa: BLE001 - keep whatever was cached
+        logger.warning("Could not refresh the plan: %s", exc)
+        return {}
+    config.plan_tier = str(profile.get("tier") or "free")
+    config.plan_features = list(profile.get("features") or [])
+    config.is_owner = bool(profile.get("owner"))
+    # The owner runs the deployment; everyone else is a signed-in user.
+    config.role = "admin" if config.is_owner else "user"
+    config.plan_checked_at = time.time()
+    if profile.get("username"):
+        config.username = str(profile["username"])
+    config.mode = config.resolved_mode()
+    config.save(config_dir)
+    return profile
+
+
 def _as_bool(value: Any) -> bool:
     """Read a checkbox the way the page might send it."""
     if isinstance(value, bool):
@@ -162,15 +190,6 @@ class Bridge:
 
     # -- signing in -----------------------------------------------------------
 
-    def _do_login_local(self, _payload: dict) -> dict:
-        """Own this machine: the engine runs here, with full rights."""
-        self.config.mode = "local"
-        self.config.role = "admin"
-        self.config.mode_chosen = True
-        self.config.save(self._config_dir)
-        self.signed_in = True
-        return {"ok": True, "mode": "local", "role": "admin"}
-
     def _do_login_password(self, payload: dict) -> dict:
         server = str(payload.get("server", "")).strip()
         username = str(payload.get("username", "")).strip()
@@ -191,19 +210,45 @@ class Bridge:
         return self._remember(client)
 
     def _remember(self, client: JarvisApiClient, *, username: str = "") -> dict:
-        """Store a successful remote sign-in."""
-        self.config.mode = "remote"
-        self.config.role = "user"          # signed-in guest — limited app
-        self.config.mode_chosen = True
+        """Store a successful sign-in, along with what the account may do."""
         self.config.server_url = client.base_url
         self.config.auth_token = client.token
+        self.config.mode_chosen = True
         if username:
             self.config.username = username
-        self.config.save(self._config_dir)
         self.client = client
+        profile = self.refresh_plan(client)
+        self.config.save(self._config_dir)
         self.signed_in = True
-        return {"ok": True, "mode": "remote", "role": "user",
-                "username": self.config.username}
+        return {"ok": True, "username": self.config.username,
+                "tier": self.config.plan_tier, "owner": self.config.is_owner,
+                "features": list(self.config.plan_features),
+                "profile": profile}
+
+    # -- what this account may do ---------------------------------------------
+
+    def refresh_plan(self, client: JarvisApiClient | None = None) -> dict:
+        """Ask the server for the account's tier and capabilities."""
+        client = client or self.client
+        if client is None:
+            return {}
+        return adopt_profile(self.config, client, config_dir=self._config_dir)
+
+    def _do_plan_get(self, payload: dict) -> dict:
+        """The account's plan — refreshed when asked, cached when offline."""
+        profile: dict = {}
+        if payload.get("refresh", True):
+            profile = self.refresh_plan()
+        return {
+            "ok": True,
+            "tier": self.config.plan_tier,
+            "owner": self.config.is_owner,
+            "features": list(self.config.plan_features),
+            "username": self.config.username,
+            "checked_at": self.config.plan_checked_at,
+            "live": bool(profile),      # False = showing the cached answer
+            "profile": profile,
+        }
 
     # -- settings -------------------------------------------------------------
 

@@ -46,6 +46,93 @@ def resolve_principal(
     return None
 
 
+def plans_for(settings: Settings) -> dict:
+    """The tier table for this deployment, with its configured limits."""
+    from jarvis.billing import build_plans
+    return build_plans(
+        free_daily=settings.plan_free_daily,
+        plus_daily=settings.plan_plus_daily,
+        pro_daily=settings.plan_pro_daily,
+        plus_price=settings.plan_plus_price_stars,
+        pro_price=settings.plan_pro_price_stars,
+    )
+
+
+def active_tier(account, service: LicenseService | None) -> str:
+    """The tier an account is actually on right now.
+
+    An expired or revoked licence is not a tier — anyone without a valid one is
+    Free, which is also what a missing licensing service means.
+    """
+    import time
+
+    from jarvis.billing import FREE, tier_for
+    if account is None or service is None:
+        return FREE
+    valid = next((lic for lic in service.list_licenses(account.id)
+                if lic.is_valid(now=time.time())), None)
+    return tier_for(valid.plan) if valid else FREE
+
+
+def profile_for(account, settings: Settings, service: LicenseService | None,
+                *, usage=None, owner: bool | None = None) -> dict:
+    """Everything a client needs to know about the signed-in person.
+
+    One builder, so the app, the API and any future client cannot disagree
+    about what a subscription includes.
+    """
+    from jarvis.billing import PRO, resolve_plan
+    from jarvis.billing.entitlements import (
+        LOCAL_ONLY,
+        SERVER_ENFORCED,
+        describe,
+        features_for,
+    )
+
+    username = getattr(account, "username", "") or ""
+    if owner is None:
+        owner = bool(settings.owner_username
+                    and username.lower() == settings.owner_username.lower())
+    tier = PRO if owner else active_tier(account, service)
+    plan = resolve_plan(tier, plans_for(settings))
+    features = sorted(features_for(tier, owner=owner))
+
+    used_today = 0
+    if usage is not None and username:
+        try:
+            used_today = int(usage.stats(f"user:{username}")["messages_today"])
+        except Exception:  # noqa: BLE001 - usage is a nicety, not a gate
+            used_today = 0
+
+    return {
+        "username": username,
+        "owner": owner,
+        "telegram_verified": bool(getattr(account, "telegram_verified", False)),
+        "tier": tier,
+        "plan": {
+            "name": plan.name,
+            "emoji": plan.emoji,
+            "daily_messages": plan.daily_messages,
+            "monthly_messages": plan.monthly_messages,
+            "unlimited": plan.unlimited or owner,
+            "integrations": plan.integrations,
+            "support": plan.support,
+            "price_stars": plan.price_stars,
+        },
+        "usage": {
+            "messages_today": used_today,
+            "remaining_today": (None if (plan.unlimited or owner)
+                                else plan.remaining_daily(used_today)),
+        },
+        "features": features,
+        "capabilities": describe(tier) if not owner else [
+            {**row, "included": True} for row in describe(PRO)],
+        # So a client can tell a real refusal from a packaging decision.
+        "enforced_server_side": sorted(SERVER_ENFORCED),
+        "local_only": sorted(LOCAL_ONLY),
+    }
+
+
 def install_auth_routes(app, settings: Settings, service: LicenseService) -> None:
     """Register /auth/* and /admin/* routes on *app*."""
     from fastapi import APIRouter, Depends, Header, HTTPException
@@ -62,9 +149,19 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
         token_type: str = "bearer"
         expires_in: int
 
+    # /auth/me answers "who am I and what do I get", so the client never has to
+    # guess a tier from a plan name.
     class MeOut(BaseModel):
         username: str
         telegram_verified: bool
+        owner: bool = False
+        tier: str = "free"
+        plan: dict = {}
+        usage: dict = {}
+        features: list[str] = []
+        capabilities: list[dict] = []
+        enforced_server_side: list[str] = []
+        local_only: list[str] = []
 
     class PairingOut(BaseModel):
         code: str
@@ -96,7 +193,9 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
     @router.post("/auth/login", response_model=TokenOut)
     async def login(body: LoginIn) -> TokenOut:
         try:
-            account = service.authenticate(body.username, body.password)
+            account = service.authenticate(
+                body.username, body.password,
+                require_license=settings.auth_require_license)
         except AuthError as exc:
             raise HTTPException(status_code=401, detail=str(exc)) from exc
         if settings.auth_require_telegram and not account.telegram_verified:
@@ -109,8 +208,17 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
 
     @router.get("/auth/me", response_model=MeOut)
     async def me(account=Depends(current_account)) -> MeOut:
-        return MeOut(username=account.username,
-                    telegram_verified=account.telegram_verified)
+        usage = None
+        try:
+            from jarvis.interfaces.usage import UsageStore
+            usage = UsageStore(settings.memory_db_path)
+        except Exception:  # noqa: BLE001 - usage is a nicety, not a gate
+            usage = None
+        try:
+            return MeOut(**profile_for(account, settings, service, usage=usage))
+        finally:
+            if usage is not None:
+                usage.close()
 
     @router.post("/auth/pairing-code", response_model=PairingOut)
     async def pairing_code(account=Depends(current_account)) -> PairingOut:

@@ -255,6 +255,14 @@ class Settings(BaseSettings):
     auth_db_path: str = "data/auth.db"
     #: Admin key required to create accounts / issue licenses (empty = disabled).
     auth_admin_key: str = ""
+    #: The operator's own account. That username signs in like anyone else but
+    #: gets every capability and no usage limits — it is the account that runs
+    #: the deployment, not a plan anyone can buy.
+    owner_username: str = ""
+    #: Refuse sign-in without an active licence. Off by default: there is a
+    #: Free tier, and a free user must be able to get in to see what a
+    #: subscription would add. Turn it on for a licence-only deployment.
+    auth_require_license: bool = False
     #: Lifetime of an issued login token, in hours.
     auth_token_ttl_hours: int = Field(default=720, gt=0)
     #: Require a linked+verified Telegram account before login succeeds.

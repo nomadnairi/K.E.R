@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/Version-1.11.0-orange)](https://github.com/nomadnairi/K.E.R/releases)
+[![Version](https://img.shields.io/badge/Version-1.12.0-orange)](https://github.com/nomadnairi/K.E.R/releases)
 
 **English** · [Русский](README.ru.md) · [O'zbek](README.uz.md)
 
@@ -149,10 +149,15 @@ animated reactor home screen with live system telemetry, chat with history, the
 model catalogue, memory, MCP servers, the log, and settings — all wired to the
 real engine over a bundled local API, updating in real time.
 
-Signing in happens in that same design, with three ways in: **this PC** (the
-engine runs here, with your own keys), an **account**, or a **Telegram login
-code** the bot hands you. The owner gets full control of their machine; a
-signed-in guest gets a limited version.
+Signing in happens in that same design: a **username and password**, or a
+**Telegram login code** the bot hands you. Everyone signs in the same way, the
+operator included — their account simply unlocks everything.
+
+What you see afterwards follows your subscription. Free talks and remembers;
+Plus adds web search, voice, every model and images; Pro adds the powers that
+only exist where the engine runs on your own machine — files, shell, desktop
+control, MCP servers and local models. Sections your plan doesn't include stay
+visible with what would unlock them, rather than quietly disappearing.
 
 The settings in that window are the real thing — language, theme, the
 assistant's name, provider and API keys, PC capabilities, voice backends,
