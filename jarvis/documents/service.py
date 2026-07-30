@@ -29,6 +29,7 @@ from pathlib import Path
 
 from jarvis.documents.chunking import chunk_text
 from jarvis.memory.embeddings import BaseEmbedder, HashingEmbedder, cosine_similarity
+from jarvis.security.crypto import KeyProvider, SecretBox
 
 
 @dataclass(frozen=True)
@@ -76,9 +77,13 @@ class DocumentIntelligence:
     """A per-account library of documents, searchable by meaning."""
 
     def __init__(self, db_path: str = "data/documents.db",
-                 embedder: BaseEmbedder | None = None) -> None:
+                 embedder: BaseEmbedder | None = None,
+                 secret_box: SecretBox | None = None) -> None:
         self._lock = threading.Lock()
         self._embedder = embedder or HashingEmbedder()
+        # Passage text is encrypted at rest when a key is configured
+        # (KER_DATA_KEY); with no key this is a transparent pass-through.
+        self._box = secret_box if secret_box is not None else KeyProvider.box()
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -131,10 +136,11 @@ class DocumentIntelligence:
                 (doc_id, principal, name, chars, now))
             for i, passage in enumerate(passages):
                 emb = json.dumps(self._embedder.embed(passage))
+                stored_text = self._box.encrypt(passage, aad=principal)
                 self._conn.execute(
                     "INSERT INTO passages (doc_id, principal, ord, text, "
                     "embedding) VALUES (?, ?, ?, ?, ?)",
-                    (doc_id, principal, i, passage, emb))
+                    (doc_id, principal, i, stored_text, emb))
             self._conn.commit()
         return Document(id=doc_id, name=name, principal=principal,
                         passages=len(passages), chars=chars, created_at=now)
@@ -161,8 +167,9 @@ class DocumentIntelligence:
                 continue
             score = cosine_similarity(q, emb)
             if score >= min_score:
+                text = self._box.decrypt(r["text"], aad=principal)
                 scored.append(Passage(doc_id=r["doc_id"], doc_name=r["name"],
-                                    ord=r["ord"], text=r["text"], score=score))
+                                    ord=r["ord"], text=text, score=score))
         scored.sort(key=lambda p: p.score, reverse=True)
         return scored[:max(1, k)]
 
