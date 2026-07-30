@@ -111,6 +111,12 @@ class AppConfig:
     perplexity_api_key: str = ""
     serpapi_key: str = ""
 
+    # -- MCP servers (Pro: external tool servers) -----------------------------
+    #: A standard ``{"mcpServers": {name: spec}}`` JSON document. Kept as text so
+    #: it round-trips to the engine's own MCP config format untouched; the deck
+    #: edits it through dedicated bridge actions, never as a free-form field.
+    mcp_servers: str = ""
+
     # -- integrations ---------------------------------------------------------
     weather_enabled: bool = True
     homeassistant_url: str = ""
@@ -235,4 +241,8 @@ class AppConfig:
             overrides["local_llm_base_url"] = self.local_llm_base_url
         if self.workspace_root:
             overrides["workspace_root"] = self.workspace_root
+        if self.mcp_servers.strip():
+            # Only turn MCP on when there is something to connect to.
+            overrides["mcp_enabled"] = True
+            overrides["mcp_servers"] = self.mcp_servers
         return overrides

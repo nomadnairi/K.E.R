@@ -738,10 +738,9 @@
       <div class="spanel" id="netPanel">Загрузка…</div>
     </section>
 
-    <!-- MCP -->
+    <!-- MCP (external tool servers — managed in the app config) -->
     <section class="view" id="view-mcp" hidden>
-      <div id="mcpList"></div>
-      <button class="btn" style="max-width:760px; width:100%; margin-top:6px" onclick="connectServer()">＋ Подключить MCP-сервер</button>
+      <div class="spanel" id="mcpPanel">Загрузка…</div>
     </section>
 
     <!-- SETTINGS -->
@@ -920,7 +919,8 @@
     if(v==="models") loadModels(); if(v==="settings") renderSettings();
     if(v==="chat") loadSessions(); if(v==="logs") loadLogs();
     if(v==="internet") loadNet(); if(v==="memory") loadMemory();
-    if(v==="plan") loadPlanScreen(); if(v==="apikeys") loadApiKeys();}
+    if(v==="plan") loadPlanScreen(); if(v==="apikeys") loadApiKeys();
+    if(v==="mcp") loadMcp();}
 
   function authH(){return CFG.key?{"X-API-Key":CFG.key,"Authorization":"Bearer "+CFG.key}:{};}
   function tick(){const t=new Date().toLocaleTimeString([],{hour12:false});$("clock").textContent=t;$("sbClock").textContent=t;}
@@ -973,7 +973,10 @@
     const netEl=$("sysNet"); if(netEl) netEl.className="cv "+((ai.search&&ai.search!=="off")?"ok":"");
     const apiEl=$("sysApi"); if(apiEl) apiEl.className="cv "+(s.online?"ok":"");
     html("caps",(s.capabilities||[]).length?s.capabilities.map(([n,st])=>`<span class="cap"><span class="s ${st}"></span>${n}</span>`).join(""):'<span style="color:var(--dim);font-family:var(--mono);font-size:12px">—</span>');
-    html("mcpList",(s.mcp||[]).length?s.mcp.map(m=>`<div class="mcp-srv"><span class="nm">${m.up?'🟢':'🔴'} ${m.name}</span><span style="font-family:var(--mono);color:var(--muted)">${m.tools} 🔧</span><span class="badge ${m.up?'up':'down'}">${m.up?'up':'down'}</span></div>`).join(''):'<div style="color:var(--dim);font-family:var(--mono);font-size:13px;padding:8px 0">Серверы не настроены</div>');
+    // Live MCP status from the running engine, keyed by name; the MCP screen
+    // matches it against the configured servers.
+    MCP_LIVE={}; (s.mcp||[]).forEach(m=>{MCP_LIVE[m.name]={up:m.up,tools:m.tools};});
+    if(!$("view-mcp").hidden) loadMcp();
   }
   let STATE=OFFLINE, WS=null;
   async function loadState(){if(!CFG.api){STATE=OFFLINE;render(OFFLINE);return;}
@@ -1155,7 +1158,81 @@
   async function sendMsg(){const q=$("q").value.trim();if(!q)return;$("q").value="";addMsg(q,"u");pulse();const th=addMsg("…","j");
     if(!CFG.api){th.innerHTML='<div class="who">'+botName()+'</div>Подключите бэкенд в Настройках → Подключение, сэр. (Демо.)';return;}
     try{const r=await fetch(CFG.api+"/chat",{method:"POST",headers:{"Content-Type":"application/json",...authH()},body:JSON.stringify({message:q,session_id:"dashboard"})});const j=await r.json();th.innerHTML='<div class="who">'+botName()+'</div>'+(j.reply||"—").replace(/</g,"&lt;");}catch(e){th.innerHTML='<div class="who">'+botName()+'</div>Сбой соединения, сэр.';}}
-  function connectServer(){const spec=prompt("MCP сервер — команда (stdio) или https URL (sse):");if(!spec)return;if(!CFG.api){alert("Демо: в приложении это подключит сервер и смонтирует инструменты.");return;}fetch(CFG.api+"/dashboard/mcp",{method:"POST",headers:{"Content-Type":"application/json",...authH()},body:JSON.stringify({spec})}).then(loadState);}
+  // ---- MCP: external tool servers, managed in the app config -------------
+  // The list of servers lives in the app config and is edited through the
+  // native bridge; the engine picks it up on the next rebuild. Live status
+  // (connected, tool count) comes from the running engine's state payload.
+  let MCP_LIVE = {};                  // name -> {up, tools} from the engine
+  let MCP_TRANSPORT = "stdio";
+  async function loadMcp(){
+    const box=$("mcpPanel"); if(!box) return;
+    if(!NATIVE){box.innerHTML=panelInfo("MCP-серверы","Управление доступно в приложении KER.");return;}
+    await loadPlan();
+    if(!can("mcp")){
+      box.innerHTML=panelInfo("MCP-серверы",
+        "Подключение MCP-серверов входит в тариф "+tierThatUnlocks("mcp")+
+        ". Оформить подписку можно в разделе «Тарифы».");
+      return;
+    }
+    const r=await nat("mcp.list");
+    renderMcp((r&&r.servers)||[]);
+  }
+  function renderMcp(servers){
+    const box=$("mcpPanel"); if(!box) return;
+    const rows=servers.length?servers.map(s=>{
+      const live=MCP_LIVE[s.name];
+      const dot=live?(live.up?"🟢":"🔴"):"⚪";
+      const state=live?(live.up?`подключён · ${live.tools} 🔧`
+                              :"ошибка подключения")
+                    :(s.valid?"будет подключён при перезапуске":"неверная настройка");
+      const where=s.transport==="sse"?esc(s.url)
+                :esc((s.command+" "+(s.args||[]).join(" ")).trim());
+      return `<div class="set-row">
+        <div><div class="t">${dot} ${esc(s.name)} <span class="tag">${esc(s.transport)}</span></div>
+          <div class="d"><code>${where||"—"}</code></div>
+          <div class="d">${state}</div></div>
+        <button class="btn" onclick="removeMcp('${esc(s.name)}')">Удалить</button></div>`;
+    }).join(""):'<div class="set-row"><div class="d">Пока нет ни одного MCP-сервера. Добавьте первый ниже.</div></div>';
+    const t=MCP_TRANSPORT;
+    const fields = t==="stdio"
+      ? `<div class="field"><label>Команда</label><input id="mcpCmd" placeholder="npx"></div>
+        <div class="field"><label>Аргументы (через пробел)</label><input id="mcpArgs" placeholder="-y @modelcontextprotocol/server-filesystem /path"></div>`
+      : `<div class="field"><label>URL (SSE)</label><input id="mcpUrl" placeholder="https://example.com/sse"></div>`;
+    box.innerHTML=`
+      <div class="card"><header><h3>Подключённые серверы</h3></header><div class="body">
+        ${rows}
+      </div></div>
+      <div class="card"><header><h3>Добавить сервер</h3></header><div class="body">
+        <div class="field"><label>Название</label><input id="mcpName" placeholder="filesystem"></div>
+        <div class="field"><label>Транспорт</label>
+          <div class="segbar">
+            <button class="seg${t==="stdio"?" on":""}" onclick="setMcpTransport('stdio')">stdio (команда)</button>
+            <button class="seg${t==="sse"?" on":""}" onclick="setMcpTransport('sse')">SSE (URL)</button>
+          </div></div>
+        ${fields}
+        <button class="btn primary" onclick="addMcp()">Добавить и перезапустить движок</button>
+        <div class="d" style="margin-top:8px">После добавления движок перезапускается, чтобы подключить сервер и смонтировать его инструменты.</div>
+      </div></div>`;
+  }
+  function setMcpTransport(t){ MCP_TRANSPORT=t; loadMcp(); }
+  async function addMcp(){
+    const name=($("mcpName")&&$("mcpName").value.trim())||"";
+    const payload={name, transport:MCP_TRANSPORT};
+    if(MCP_TRANSPORT==="stdio"){
+      payload.command=($("mcpCmd")&&$("mcpCmd").value.trim())||"";
+      payload.args=($("mcpArgs")&&$("mcpArgs").value.trim())||"";
+    }else{
+      payload.url=($("mcpUrl")&&$("mcpUrl").value.trim())||"";
+    }
+    const r=await nat("mcp.add",payload);
+    if(r&&r.ok){ toast("Сервер добавлен — движок перезапускается"); renderMcp(r.servers||[]); }
+    else toast((r&&r.error)||"Не удалось добавить","bad");
+  }
+  async function removeMcp(name){
+    const r=await nat("mcp.remove",{name});
+    if(r&&r.ok){ toast("Сервер удалён"); renderMcp(r.servers||[]); }
+    else toast((r&&r.error)||"Не удалось удалить","bad");
+  }
   function pulse(){document.querySelectorAll(".viz i").forEach(b=>{b.style.animationDuration="0.6s";setTimeout(()=>b.style.animationDuration="1.1s",900);});}
 
   // ---- settings ---------------------------------------------------------
