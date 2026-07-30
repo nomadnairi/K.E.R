@@ -20,9 +20,14 @@ LOGIN = "desktop_login.html"
 
 #: The server a fresh install points at. An operator selling KER bakes their own
 #: address in here (or via the ``KER_SERVER_URL`` build env) so a customer never
-#: types a server address; left as localhost it suits someone self-hosting.
+#: types a server address. This is the operator's public KER server; a customer
+#: can still change it in the sign-in screen.
+#:
+#: NOTE: this is plain HTTP — logins, tokens and API keys travel unencrypted.
+#: Put the server behind HTTPS (a domain + TLS, e.g. Caddy/nginx + Let's
+#: Encrypt) and change this to https:// before real customers use it.
 DEFAULT_SERVER_URL = os.environ.get("KER_SERVER_URL", "").strip() \
-    or "http://localhost:8000"
+    or "http://2.26.80.6:8000"
 
 
 def default_server_url() -> str:
