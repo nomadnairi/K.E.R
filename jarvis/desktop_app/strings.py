@@ -51,27 +51,46 @@ STRINGS: dict[str, dict[str, str]] = {
         "mode_local": "Local (this PC)",
         "mode_remote": "Account (server)",
         "login_title": "Sign in to KER",
-        "login_local_hint": "Run everything on this computer with your own API keys.",
         "login_remote_hint": "Use the login and password you received after purchase.",
         "server_url": "Server URL",
         "username": "Username",
         "password": "Password",
         "sign_in": "Sign in",
-        "continue_local": "Continue in local mode",
         "login_failed": "Sign-in failed: {error}",
-        "login_subtitle": "Three ways in — take the one that fits.",
+        "login_subtitle": "Sign in with your account, or with a code from the bot.",
         "login_tagline": ("Your assistant runs where you are: on this "
                         "computer, with your keys and your data."),
-        "login_tab_local": "This PC",
         "login_tab_account": "Account",
         "login_tab_telegram": "Telegram",
+        "login_tab_register": "Register",
         "login_hint_telegram": ("In the bot: Link account → App login code. "
-                                "Type that code here."),
+                                "Type that code here. On first use the code "
+                                "creates your account — Free tier, no "
+                                "registration needed."),
+        "login_hint_register": ("Choose a login and a password. The new "
+                                "account starts on the Free tier; a "
+                                "subscription upgrades it without changing "
+                                "how you sign in."),
         "login_cta_telegram": "Sign in with the code",
+        "login_cta_register": "Create account and sign in",
         "login_code": "Login code",
+        "password_repeat": "Repeat the password",
+        "password_mismatch": "The two passwords do not match.",
         "login_no_bridge": ("The app isn't answering. Restart KER and try "
                             "again."),
-        "login_foot": "Local mode needs no account",
+        "login_foot": "The same login works in the bot and in the app",
+        # What the server said about itself, so a refusal can be explained
+        # instead of showing a bare "invalid code".
+        "probe_checking": "Checking the server…",
+        "probe_ready": "{name} {version} — accounts on",
+        "probe_no_accounts": ("This server has accounts switched off, so "
+                            "neither a login nor a bot code works here. Set "
+                            "AUTH_ENABLED=true on the server, or enter the "
+                            "address of the one that sells the "
+                            "subscriptions."),
+        "probe_unreachable": "The server is not answering: {error}",
+        "probe_no_signup": ("Registration is closed on this server — get an "
+                            "account through the Telegram bot."),
         "provider": "LLM provider",
         "model": "Model (empty = default)",
         "anthropic_key": "Anthropic API key",
@@ -148,27 +167,45 @@ STRINGS: dict[str, dict[str, str]] = {
         "mode_local": "Локально (этот ПК)",
         "mode_remote": "Аккаунт (сервер)",
         "login_title": "Вход в KER",
-        "login_local_hint": "Всё работает на этом компьютере с вашими API-ключами.",
         "login_remote_hint": "Введите логин и пароль, полученные после покупки.",
         "server_url": "Адрес сервера",
         "username": "Логин",
         "password": "Пароль",
         "sign_in": "Войти",
-        "continue_local": "Продолжить локально",
         "login_failed": "Вход не выполнен: {error}",
-        "login_subtitle": "Три способа войти — выберите свой.",
+        "login_subtitle": "Войдите по аккаунту или по коду из бота.",
         "login_tagline": ("Ассистент работает там, где вы: на этом "
                         "компьютере, с вашими ключами и вашими данными."),
-        "login_tab_local": "Этот ПК",
         "login_tab_account": "Аккаунт",
         "login_tab_telegram": "Telegram",
+        "login_tab_register": "Регистрация",
         "login_hint_telegram": ("В боте: Привязать аккаунт → Код для входа в "
-                                "приложение. Введите этот код здесь."),
+                                "приложение. Введите этот код здесь. При "
+                                "первом входе код сам создаёт аккаунт — "
+                                "тариф Free, регистрация не нужна."),
+        "login_hint_register": ("Придумайте логин и пароль. Новый аккаунт "
+                                "начинается с тарифа Free; подписка "
+                                "повышает тариф, а вход остаётся тем же."),
         "login_cta_telegram": "Войти по коду",
+        "login_cta_register": "Создать аккаунт и войти",
         "login_code": "Код входа",
+        "password_repeat": "Повторите пароль",
+        "password_mismatch": "Пароли не совпадают.",
         "login_no_bridge": ("Приложение не отвечает. Перезапустите KER и "
                             "попробуйте снова."),
-        "login_foot": "Для локального режима аккаунт не нужен",
+        "login_foot": "Один и тот же логин работает в боте и в приложении",
+        # Что сервер сказал о себе — чтобы отказ можно было объяснить, а не
+        # показывать сухое «неверный код».
+        "probe_checking": "Проверяем сервер…",
+        "probe_ready": "{name} {version} — аккаунты включены",
+        "probe_no_accounts": ("На этом сервере аккаунты выключены, поэтому "
+                            "здесь не работают ни логин, ни код из бота. "
+                            "Включите AUTH_ENABLED=true на сервере или "
+                            "укажите адрес того сервера, который продаёт "
+                            "подписки."),
+        "probe_unreachable": "Сервер не отвечает: {error}",
+        "probe_no_signup": ("Регистрация на этом сервере закрыта — аккаунт "
+                            "выдаёт Telegram-бот."),
         "provider": "LLM-провайдер",
         "model": "Модель (пусто = по умолчанию)",
         "anthropic_key": "Ключ Anthropic API",
@@ -245,28 +282,45 @@ STRINGS: dict[str, dict[str, str]] = {
         "mode_local": "Lokal (shu kompyuter)",
         "mode_remote": "Hisob (server)",
         "login_title": "KER ga kirish",
-        "login_local_hint": "Hammasi shu kompyuterda, o'z API kalitlaringiz bilan.",
         "login_remote_hint": "Xariddan keyin berilgan login va parolni kiriting.",
         "server_url": "Server manzili",
         "username": "Login",
         "password": "Parol",
         "sign_in": "Kirish",
-        "continue_local": "Lokal rejimda davom etish",
         "login_failed": "Kirish amalga oshmadi: {error}",
-        "login_subtitle": "Kirishning uch yo'li — o'zingizga mosini tanlang.",
+        "login_subtitle": "Hisob bilan yoki botdagi kod bilan kiring.",
         "login_tagline": ("Yordamchi siz turgan joyda ishlaydi: shu "
                         "kompyuterda, o'z kalitlaringiz va ma'lumotlaringiz "
                         "bilan."),
-        "login_tab_local": "Shu kompyuter",
         "login_tab_account": "Hisob",
         "login_tab_telegram": "Telegram",
+        "login_tab_register": "Ro'yxatdan o'tish",
         "login_hint_telegram": ("Botda: Hisobni ulash → Ilovaga kirish kodi. "
-                                "Shu kodni bu yerga kiriting."),
+                                "Shu kodni bu yerga kiriting. Birinchi "
+                                "kirishda kod hisobni o'zi yaratadi — Free "
+                                "tarifi, ro'yxatdan o'tish shart emas."),
+        "login_hint_register": ("Login va parol o'ylab toping. Yangi hisob "
+                                "Free tarifidan boshlanadi; obuna tarifni "
+                                "oshiradi, kirish esa o'zgarmaydi."),
         "login_cta_telegram": "Kod bilan kirish",
+        "login_cta_register": "Hisob yaratib kirish",
         "login_code": "Kirish kodi",
+        "password_repeat": "Parolni takrorlang",
+        "password_mismatch": "Parollar mos kelmadi.",
         "login_no_bridge": ("Ilova javob bermayapti. KER ni qayta ishga "
                             "tushiring."),
-        "login_foot": "Lokal rejim uchun hisob kerak emas",
+        "login_foot": "Bitta login botda ham, ilovada ham ishlaydi",
+        # Server o'zi haqida nima dedi — rad javobini tushuntirish uchun.
+        "probe_checking": "Server tekshirilmoqda…",
+        "probe_ready": "{name} {version} — hisoblar yoniq",
+        "probe_no_accounts": ("Bu serverda hisoblar o'chirilgan, shuning "
+                            "uchun na login, na botdagi kod ishlaydi. "
+                            "Serverda AUTH_ENABLED=true qiling yoki "
+                            "obunalarni sotadigan server manzilini "
+                            "kiriting."),
+        "probe_unreachable": "Server javob bermayapti: {error}",
+        "probe_no_signup": ("Bu serverda ro'yxatdan o'tish yopiq — hisobni "
+                            "Telegram bot beradi."),
         "provider": "LLM provayderi",
         "model": "Model (bo'sh = standart)",
         "anthropic_key": "Anthropic API kaliti",

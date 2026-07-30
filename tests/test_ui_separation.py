@@ -71,3 +71,58 @@ def test_packaging_keeps_the_web_view():
                    "PySide6.QtQuick", "PySide6.QtQml", "PySide6.QtWebChannel"):
         # Quoted, so excluding QtQuick3D doesn't read as excluding QtQuick.
         assert f'"{module}"' not in excludes, f"{module} must stay in the bundle"
+
+
+# -- the way in --------------------------------------------------------------
+
+def test_the_sign_in_screen_offers_every_way_in():
+    """Account, bot code and registration — each with its own submit."""
+    html = LOGIN.read_text(encoding="utf-8")
+    for pane in ("pane-account", "pane-telegram", "pane-register"):
+        assert f'id="{pane}"' in html
+    for action in ("login.password", "login.telegram", "login.register"):
+        assert action in html
+
+
+def test_the_server_address_is_asked_for_once():
+    """Two address fields invited typing two different servers."""
+    html = LOGIN.read_text(encoding="utf-8")
+    assert html.count('id="server"') == 1
+    assert 'id="server2"' not in html
+
+
+def test_the_screen_probes_the_server_before_offering_a_login():
+    """So 'accounts are off here' is said instead of 'invalid code'."""
+    html = LOGIN.read_text(encoding="utf-8")
+    assert "server.probe" in html
+    assert 'id="probe"' in html
+
+
+def test_the_register_tab_stays_hidden_until_the_server_allows_signup():
+    html = LOGIN.read_text(encoding="utf-8")
+    tab = [line for line in html.splitlines() if 'id="tab-register"' in line][0]
+    assert "hidden" in tab, "an open form on a closed server is a dead end"
+    assert '$("tab-register").hidden = !res.signup' in html
+
+
+def test_every_string_the_sign_in_screen_asks_for_is_translated():
+    """A missing key would render as the key itself, in every language."""
+    from jarvis.desktop_app.assets import login_strings
+    from jarvis.desktop_app.config import AppConfig
+    from jarvis.desktop_app.strings import STRINGS
+    skip = {"version_line", "server_url", "username_value", "theme", "brand"}
+    for locale in STRINGS:
+        strings = login_strings(AppConfig(language=locale))
+        for key, value in strings.items():
+            if key in skip:
+                continue
+            assert value, f"{locale}: {key} is empty"
+            assert not value.startswith("login_"), f"{locale}: {key} untranslated"
+            assert not value.startswith("probe_"), f"{locale}: {key} untranslated"
+
+
+def test_the_telegram_hint_explains_that_the_code_makes_an_account():
+    """People were reading the code as a link-only step and getting stuck."""
+    from jarvis.desktop_app.strings import tr
+    assert "аккаунт" in tr("login_hint_telegram", "ru").lower()
+    assert "account" in tr("login_hint_telegram", "en").lower()

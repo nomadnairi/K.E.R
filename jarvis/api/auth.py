@@ -190,6 +190,40 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
 
     # -- user-facing ----------------------------------------------------------
 
+    @router.post("/auth/register", response_model=TokenOut)
+    async def register(body: LoginIn) -> TokenOut:
+        """Create an account and sign in with it, on the Free tier.
+
+        Off unless the operator turns it on: a deployment that sells only
+        through the bot does not want an open registration form. Signing in with
+        a Telegram code creates an account too, which is why this is optional
+        rather than the only way to get one.
+        """
+        if not settings.auth_allow_signup:
+            raise HTTPException(
+                status_code=403,
+                detail="Registration is closed on this server — get an "
+                        "account through the Telegram bot.")
+        username = body.username.strip()
+        if len(username) < 3:
+            raise HTTPException(status_code=400,
+                                detail="The username needs at least 3 characters.")
+        if len(body.password) < settings.auth_min_password_length:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The password needs at least "
+                        f"{settings.auth_min_password_length} characters.")
+        if service.get_account(username) is not None:
+            raise HTTPException(status_code=409,
+                                detail="That username is taken.")
+        try:
+            account = service.create_account(username, body.password)
+        except Exception as exc:  # noqa: BLE001 - reported to the caller
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        token = service.issue_token(account.id)
+        return TokenOut(token=token,
+                        expires_in=settings.auth_token_ttl_hours * 3600)
+
     @router.post("/auth/login", response_model=TokenOut)
     async def login(body: LoginIn) -> TokenOut:
         try:

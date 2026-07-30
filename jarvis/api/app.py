@@ -153,11 +153,22 @@ def create_app(engine: JarvisEngine | None = None,
 
     @app.get("/")
     async def root() -> dict:
+        """What this server is and how one gets in.
+
+        A client asks this *before* offering a way in, so it can say "this
+        server has accounts switched off" instead of letting someone type a
+        login code that could never work.
+        """
+        accounts = service is not None
         return {
             "name": settings.assistant_name,
             "version": __version__,
             "status": "online",
-            "auth": "accounts" if service is not None else "shared-key",
+            "auth": "accounts" if accounts else "shared-key",
+            "accounts": accounts,
+            "signup": bool(accounts and settings.auth_allow_signup),
+            "telegram_login": accounts,
+            "requires_license": bool(accounts and settings.auth_require_license),
         }
 
     @app.get("/health")

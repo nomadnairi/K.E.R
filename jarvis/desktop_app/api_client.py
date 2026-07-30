@@ -78,6 +78,13 @@ class JarvisApiClient:
         self.token = out["token"]
         return self.token
 
+    def register(self, username: str, password: str) -> str:
+        """Create an account and sign in with it; stores the token."""
+        out = self._request("POST", "/auth/register",
+                            {"username": username, "password": password})
+        self.token = out["token"]
+        return self.token
+
     def login_with_telegram_code(self, code: str) -> str:
         """Sign in with a bot-issued Telegram login code; stores the token."""
         out = self._request("POST", "/auth/telegram", {"code": code.strip()})

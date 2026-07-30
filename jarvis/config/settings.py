@@ -263,6 +263,12 @@ class Settings(BaseSettings):
     #: Free tier, and a free user must be able to get in to see what a
     #: subscription would add. Turn it on for a licence-only deployment.
     auth_require_license: bool = False
+    #: Let people create their own account from the app (self-serve signup on
+    #: the Free tier). Off by default, because a deployment that sells only
+    #: through the bot does not want an open registration form.
+    auth_allow_signup: bool = False
+    #: Shortest password a new account may have.
+    auth_min_password_length: int = Field(default=8, ge=6, le=128)
     #: Lifetime of an issued login token, in hours.
     auth_token_ttl_hours: int = Field(default=720, gt=0)
     #: Require a linked+verified Telegram account before login succeeds.
