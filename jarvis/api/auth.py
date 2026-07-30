@@ -259,6 +259,34 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
         code = service.create_pairing_code(account.id)
         return PairingOut(code=code, expires_in=600)
 
+    # -- API keys (the credential behind the hosted proxy) --------------------
+    # Managed here because this is where an account is already resolved. The
+    # keys are only useful with the proxy (see jarvis/api/proxy_routes.py), but
+    # a person creates and revokes them as part of their account.
+
+    class ApiKeyIn(BaseModel):
+        label: str = ""
+
+    @router.get("/auth/api-keys")
+    async def list_api_keys(account=Depends(current_account)) -> dict:
+        """The account's live API keys — metadata only, never the secret."""
+        return {"keys": service.list_api_keys(account.id)}
+
+    @router.post("/auth/api-keys")
+    async def create_api_key(body: ApiKeyIn,
+                             account=Depends(current_account)) -> dict:
+        """Mint a key, returned in plaintext once — only the hash is stored."""
+        key = service.create_api_key(account.id, label=body.label)
+        return {"key": key, "note": "Store this now — it is shown only once."}
+
+    @router.delete("/auth/api-keys/{key_id}")
+    async def revoke_api_key(key_id: int,
+                             account=Depends(current_account)) -> dict:
+        """Revoke one of the account's keys; effective on the next request."""
+        if not service.revoke_api_key(account.id, key_id):
+            raise HTTPException(status_code=404, detail="Key not found.")
+        return {"status": "revoked", "id": key_id}
+
     @router.post("/auth/logout")
     async def logout(
         authorization: str | None = Header(default=None),

@@ -115,6 +115,17 @@ class LicenseService:
                 expires_at REAL NOT NULL,
                 used INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                key_hash TEXT UNIQUE NOT NULL,
+                prefix TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL,
+                last_used_at REAL,
+                revoked INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
             """
         )
         self._conn.commit()
@@ -255,6 +266,81 @@ class LicenseService:
         )
         self._conn.commit()
         return cur.rowcount
+
+    # -- API keys -------------------------------------------------------------
+    #
+    # These are the credential behind "API от меня". Unlike a login token they
+    # do not expire on a clock — a person pastes one into their own tool and
+    # expects it to keep working — so they are long-lived, listable and
+    # individually revocable. Only the hash is stored; the plaintext is shown
+    # once, at creation. A short prefix is kept in the clear so a person can
+    # tell their keys apart in a list without us ever holding the secret.
+
+    #: Human-readable start of every proxy key, so it is obvious what it is.
+    API_KEY_PREFIX = "ker-"
+
+    def create_api_key(self, user_id: int, *, label: str = "") -> str:
+        """Mint a new API key for an account; returns the plaintext once."""
+        key = self.API_KEY_PREFIX + secrets.token_urlsafe(30)
+        display = key[:12]              # e.g. "ker-Ab3xQ" — enough to recognise
+        self._conn.execute(
+            "INSERT INTO api_keys (user_id, key_hash, prefix, label, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (user_id, _token_hash(key), display, label.strip()[:60], time.time()),
+        )
+        self._conn.commit()
+        return key
+
+    def validate_api_key(self, key: str) -> Account | None:
+        """Return the account for a live key, else ``None`` (and stamp usage)."""
+        if not key or not key.startswith(self.API_KEY_PREFIX):
+            return None
+        row = self._conn.execute(
+            "SELECT a.*, k.id AS key_id FROM api_keys k "
+            "JOIN accounts a ON a.id = k.user_id "
+            "WHERE k.key_hash = ? AND k.revoked = 0 AND a.active = 1",
+            (_token_hash(key),),
+        ).fetchone()
+        if row is None:
+            return None
+        # Best-effort last-used stamp; a write failure must not deny a valid key.
+        try:
+            self._conn.execute(
+                "UPDATE api_keys SET last_used_at = ? WHERE id = ?",
+                (time.time(), row["key_id"]),
+            )
+            self._conn.commit()
+        except sqlite3.Error:  # pragma: no cover - stamping is a nicety
+            pass
+        return self._account_from_row(row)
+
+    def list_api_keys(self, user_id: int) -> list[dict]:
+        """Live keys for an account — metadata only, never the secret."""
+        rows = self._conn.execute(
+            "SELECT id, prefix, label, created_at, last_used_at FROM api_keys "
+            "WHERE user_id = ? AND revoked = 0 ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "prefix": r["prefix"],
+                "label": r["label"],
+                "created_at": r["created_at"],
+                "last_used_at": r["last_used_at"],
+            }
+            for r in rows
+        ]
+
+    def revoke_api_key(self, user_id: int, key_id: int) -> bool:
+        """Revoke one key, but only if it belongs to this account."""
+        cur = self._conn.execute(
+            "UPDATE api_keys SET revoked = 1 WHERE id = ? AND user_id = ? "
+            "AND revoked = 0",
+            (key_id, user_id),
+        )
+        self._conn.commit()
+        return cur.rowcount > 0
 
     # -- licenses -------------------------------------------------------------
 

@@ -296,6 +296,23 @@ class Settings(BaseSettings):
     plan_plus_price_stars: int = Field(default=2500, gt=0)
     plan_pro_price_stars: int = Field(default=8000, gt=0)
 
+    # --- Hosted LLM proxy ("API от меня") ---
+    #: Serve the operator's models to signed-in accounts at an OpenAI-compatible
+    #: endpoint, metered per tier and revocable. This is what "Pro gets my API"
+    #: means: a Pro user points their own tools at this server instead of being
+    #: handed a raw provider key they could copy, share or run up without limit.
+    proxy_enabled: bool = False
+    #: Daily token allowance per tier for the proxy (0 = unlimited). Separate
+    #: from the message counter because API access spends tokens far faster than
+    #: chat does. Free is off by default (no API access); Plus is metered; Pro
+    #: is unlimited.
+    proxy_free_daily_tokens: int = Field(default=0, ge=0)
+    proxy_plus_daily_tokens: int = Field(default=1_000_000, ge=0)
+    proxy_pro_daily_tokens: int = Field(default=0, ge=0)
+    #: Hard ceiling on max_tokens a single proxied request may ask for, so one
+    #: call cannot drain a day's allowance. 0 = no ceiling.
+    proxy_max_output_tokens: int = Field(default=4096, ge=0)
+
     # --- Image generation (Plus/Pro feature) ---
     #: Enable the bot's image mode (needs an OpenAI-compatible Images API key).
     image_enabled: bool = False
