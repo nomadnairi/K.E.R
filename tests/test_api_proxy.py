@@ -232,6 +232,66 @@ def test_the_proxy_does_not_exist_when_disabled():
         assert r.status_code == 404
 
 
+def test_usage_reports_spend_against_the_ceiling():
+    with TestClient(_app(proxy_plus_daily_tokens=1000)) as client:
+        _token, key = _plus_key(client)
+        head = {"Authorization": f"Bearer {key}"}
+        # Nothing spent yet.
+        u0 = client.get("/v1/usage", headers=head).json()
+        assert u0["tier"] == "plus" and u0["used_today"] == 0
+        assert u0["limit"] == 1000 and u0["remaining"] == 1000
+        assert u0["unlimited"] is False
+        # Spend 15 (10+5) on one completion, then usage reflects it.
+        client.post("/v1/chat/completions",
+                    json={"messages": [{"role": "user", "content": "hi"}]},
+                    headers=head)
+        u1 = client.get("/v1/usage", headers=head).json()
+        assert u1["used_today"] == 15 and u1["remaining"] == 985
+
+
+def test_usage_still_answers_when_over_the_limit():
+    """Over quota returns 200 with the numbers, not a 429 — so a UI can show it."""
+    with TestClient(_app(proxy_plus_daily_tokens=10)) as client:
+        _token, key = _plus_key(client)
+        head = {"Authorization": f"Bearer {key}"}
+        client.post("/v1/chat/completions",
+                    json={"messages": [{"role": "user", "content": "hi"}]},
+                    headers=head)
+        # Completions now 429, but usage is still readable.
+        assert client.post("/v1/chat/completions",
+                        json={"messages": [{"role": "user", "content": "x"}]},
+                        headers=head).status_code == 429
+        u = client.get("/v1/usage", headers=head)
+        assert u.status_code == 200
+        assert u.json()["remaining"] == 0
+
+
+def test_usage_is_unlimited_for_pro():
+    with TestClient(_app(proxy_pro_daily_tokens=0, owner_username="boss")) as client:
+        client.post("/admin/accounts",
+                    json={"username": "boss", "password": "secret-boss"},
+                    headers=ADMIN)
+        token = client.post("/auth/login",
+                            json={"username": "boss", "password": "secret-boss"}
+                            ).json()["token"]
+        u = client.get("/v1/usage",
+                    headers={"Authorization": f"Bearer {token}"}).json()
+        assert u["unlimited"] is True and u["remaining"] is None
+
+
+def test_usage_is_refused_for_free():
+    with TestClient(_app()) as client:
+        client.post("/admin/accounts",
+                    json={"username": "free", "password": "pw-free-123"},
+                    headers=ADMIN)
+        token = client.post("/auth/login",
+                            json={"username": "free", "password": "pw-free-123"}
+                            ).json()["token"]
+        assert client.get("/v1/usage",
+                        headers={"Authorization": f"Bearer {token}"}
+                        ).status_code == 403
+
+
 def test_root_advertises_the_proxy():
     with TestClient(_app()) as client:
         assert client.get("/").json()["proxy"] is True

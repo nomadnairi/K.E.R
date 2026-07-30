@@ -1545,6 +1545,7 @@
   // ever comes back, exactly as the server stores it. Everything here goes
   // through the same native bridge as the rest of the deck.
   let JUST_MADE = null;               // {key,label}: the one-time plaintext
+  let USAGE = null;                   // today's proxy spend, or null if unknown
   async function loadApiKeys(){
     const box=$("apikeysPanel"); if(!box) return;
     if(!NATIVE){box.innerHTML=panelInfo("API-ключи","Доступно в приложении KER.");return;}
@@ -1558,7 +1559,34 @@
     const r=await nat("apikeys.list");
     if(!r||!r.ok){box.innerHTML=panelInfo("API-ключи",
       (r&&r.error)||"Не удалось получить ключи.");return;}
+    const u=await nat("apikeys.usage");
+    USAGE=(u&&u.ok&&u.usage)?u.usage:null;
     renderApiKeys(r.keys||[]);
+  }
+  //: A card with today's token spend against the tier ceiling. Absent when the
+  //: server has the proxy switched off — then there is nothing to meter.
+  function usageCard(){
+    if(!USAGE) return "";
+    const u=USAGE;
+    if(u.unlimited){
+      return `<div class="card"><header><h3>Использование сегодня</h3></header><div class="body">
+        ${srow("Потрачено токенов","Тариф без лимита",
+          `<code>${dash(u.used_today)}</code> <span class="badge up">безлимит</span>`)}
+      </div></div>`;
+    }
+    const used=u.used_today||0, lim=u.limit||0;
+    const pct=lim?Math.min(100,Math.round(used/lim*100)):0;
+    const low=(u.remaining!==null&&u.remaining!==undefined&&u.remaining<=0);
+    const bar=`<div style="margin-top:10px;height:8px;border-radius:6px;background:rgba(255,255,255,.06);overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${low?"var(--crit)":"linear-gradient(90deg,var(--accent),var(--good))"}"></div></div>`;
+    return `<div class="card"><header><h3>Использование сегодня</h3></header><div class="body">
+        ${srow("Токенов за сутки","Дневная норма тарифа",
+          `<code>${used.toLocaleString("ru")} / ${lim.toLocaleString("ru")}</code>`+
+          (low?' <span class="tag pop">лимит исчерпан</span>':
+              ` <span class="tag">осталось ${(u.remaining||0).toLocaleString("ru")}</span>`))}
+        ${bar}
+        <div class="d" style="margin-top:8px">Счётчик обнуляется каждые 24 часа. На Pro лимита нет.</div>
+      </div></div>`;
   }
   function renderApiKeys(keys){
     const box=$("apikeysPanel"); if(!box) return;
@@ -1576,7 +1604,7 @@
             style="flex:1;font-family:var(--mono);font-size:13px" onclick="this.select()">
           <button class="btn primary" onclick="copyKey()">Скопировать</button></div>
       </div></div>` : "";
-    box.innerHTML = reveal + `
+    box.innerHTML = reveal + usageCard() + `
       <div class="card"><header><h3>Ваши API-ключи</h3></header><div class="body">
         ${rows}
         <div class="set-row" style="gap:10px;margin-top:6px">

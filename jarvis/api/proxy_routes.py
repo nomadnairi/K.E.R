@@ -143,11 +143,14 @@ def install_proxy_routes(app, settings: Settings, service: LicenseService,
         tier = PRO if owner else active_tier(account, service)
         return account, tier, owner
 
-    async def proxy_caller(
-        authorization: str | None = Header(default=None),
-        x_api_key: str | None = Header(default=None),
-    ):
-        """The account behind a proxy call, past auth + entitlement + meter."""
+    def _entitled_caller(authorization: str | None, x_api_key: str | None):
+        """Resolve → (principal, tier, owner) past auth + entitlement.
+
+        This is the shared gate: a live account that is allowed to touch the
+        proxy at all. The daily-quota check is layered on top for the endpoints
+        that actually spend tokens; the usage endpoint deliberately skips it so
+        it can still report an account that is already over its limit.
+        """
         key = None
         if authorization and authorization.startswith("Bearer "):
             key = authorization[len("Bearer "):]
@@ -162,7 +165,14 @@ def install_proxy_routes(app, settings: Settings, service: LicenseService,
                 status_code=403,
                 detail="Your plan does not include API access. Upgrade to Plus "
                         "or Pro to use the API.")
-        principal = f"user:{account.username}"
+        return f"user:{account.username}", tier, owner
+
+    async def proxy_caller(
+        authorization: str | None = Header(default=None),
+        x_api_key: str | None = Header(default=None),
+    ):
+        """The account behind a proxy call, past auth + entitlement + meter."""
+        principal, tier, owner = _entitled_caller(authorization, x_api_key)
         decision = meter.check(principal, tier)
         if not decision.allowed:
             raise HTTPException(
@@ -182,6 +192,20 @@ def install_proxy_routes(app, settings: Settings, service: LicenseService,
         data = [{"id": name, "object": "model", "created": now, "owned_by": "ker"}
                 for name in engine.llm.list_profiles()]
         return {"object": "list", "data": data}
+
+    @router.get("/v1/usage")
+    async def usage(
+        authorization: str | None = Header(default=None),
+        x_api_key: str | None = Header(default=None),
+    ) -> dict:
+        """Today's proxy token spend for the caller, against the tier ceiling.
+
+        Reports even an account that is over its limit, so a client can show
+        "used up" rather than only ever getting a 429.
+        """
+        principal, tier, _owner = _entitled_caller(authorization, x_api_key)
+        snap = meter.snapshot(principal, tier)
+        return {"tier": tier, **snap.as_dict()}
 
     def _cap_output(requested: int | None) -> int | None:
         ceiling = settings.proxy_max_output_tokens

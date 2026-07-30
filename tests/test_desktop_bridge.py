@@ -78,6 +78,11 @@ class FakeClient:
         self._keys = [k for k in getattr(self, "_keys", [])
                     if k["id"] != key_id]
 
+    def proxy_usage(self) -> dict:
+        self.calls.append(("usage",))
+        return {"tier": "plus", "used_today": 250, "limit": 1000,
+                "remaining": 750, "unlimited": False}
+
 
 class UnreachableClient(FakeClient):
     """A server that answers the login but is gone by the time we ask again."""
@@ -491,3 +496,26 @@ def test_revoking_without_an_id_is_refused(bridge):
     bridge.handle("login.password", {"server": "http://localhost:8000",
                                      "username": "ann", "password": "secret"})
     assert bridge.handle("apikeys.revoke", {})["ok"] is False
+
+
+def test_usage_comes_back_with_the_spend(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                     "username": "ann", "password": "secret"})
+    out = bridge.handle("apikeys.usage")
+    assert out["ok"] is True
+    assert out["usage"]["used_today"] == 250
+    assert out["usage"]["remaining"] == 750
+
+
+def test_usage_is_unavailable_when_the_server_has_no_proxy(tmp_path):
+    class NoProxy(FakeClient):
+        def proxy_usage(self) -> dict:
+            raise ApiError(404, "Not Found")
+
+    b = Bridge(AppConfig(), client_factory=NoProxy, config_dir=tmp_path)
+    b.handle("login.password", {"server": "http://localhost:8000",
+                                "username": "ann", "password": "secret"})
+    out = b.handle("apikeys.usage")
+    # A missing endpoint is "nothing to show", not an error to apologise for.
+    assert out["ok"] is True and out["unavailable"] is True
+    assert out["usage"] is None
