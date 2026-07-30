@@ -124,6 +124,24 @@ jobs:
         with:
           files: ${{ matrix.target == 'windows-amd64' && 'dist/*Setup*.exe' || 'dist/*' }}
 
+      # The version comes from the source, never from a literal in here: a
+      # hardcoded tag quietly re-publishes the previous release the moment
+      # someone forgets to edit this file.
+      - name: Read the version being released
+        id: ver
+        if: github.event_name == 'workflow_dispatch' && matrix.target == 'windows-amd64'
+        shell: bash
+        run: |
+          v=$(python -c "import re, pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('jarvis/__init__.py').read_text()).group(1))")
+          notes="docs/RELEASE_NOTES_v$v.md"
+          if [ ! -f "$notes" ]; then
+            echo "::error::$notes is missing - write the release notes before publishing v$v"
+            exit 1
+          fi
+          echo "Publishing v$v from $notes"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "notes=$notes" >> "$GITHUB_OUTPUT"
+
       # Manual publish: a workflow_dispatch run creates the public release
       # itself (the Action's GITHUB_TOKEN has contents: write), so a tag can
       # be cut without local tag-push access.
@@ -131,8 +149,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && matrix.target == 'windows-amd64'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.12.0
-          name: "KER v1.12.0"
-          body_path: docs/RELEASE_NOTES_v1.12.0.md
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: "KER v${{ steps.ver.outputs.version }}"
+          body_path: ${{ steps.ver.outputs.notes }}
           prerelease: true
           files: dist/*Setup*.exe
