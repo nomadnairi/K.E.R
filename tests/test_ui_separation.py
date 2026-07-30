@@ -126,3 +126,23 @@ def test_the_telegram_hint_explains_that_the_code_makes_an_account():
     from jarvis.desktop_app.strings import tr
     assert "аккаунт" in tr("login_hint_telegram", "ru").lower()
     assert "account" in tr("login_hint_telegram", "en").lower()
+
+
+# -- the API-keys panel ------------------------------------------------------
+
+def test_the_deck_has_an_api_keys_screen_gated_by_the_entitlement():
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert 'id="view-apikeys"' in html
+    assert 'data-view="apikeys"' in html
+    # Gated on api_access, so Free sees it locked, not open.
+    assert '"api_access"' in html and 'apikeys:"api_access"' in html
+    # Every key action is wired to the native bridge.
+    for action in ("apikeys.list", "apikeys.create", "apikeys.revoke"):
+        assert action in html
+
+
+def test_the_api_keys_screen_shows_the_secret_once():
+    """The one-time reveal must exist; the list only ever shows the prefix."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert "JUST_MADE" in html
+    assert "copyKey" in html

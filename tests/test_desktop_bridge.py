@@ -59,6 +59,25 @@ class FakeClient:
         self.calls.append(("me",))
         return dict(self.profile)
 
+    # -- API keys -----------------------------------------------------------
+
+    def list_api_keys(self) -> list:
+        self.calls.append(("list_keys",))
+        return list(getattr(self, "_keys", []))
+
+    def create_api_key(self, label: str = "") -> str:
+        self.calls.append(("create_key", label))
+        self._keys = getattr(self, "_keys", [])
+        new_id = len(self._keys) + 1
+        self._keys.append({"id": new_id, "prefix": "ker-abc",
+                        "label": label, "created_at": 1.0, "last_used_at": None})
+        return f"ker-secret-{new_id}"
+
+    def revoke_api_key(self, key_id: int) -> None:
+        self.calls.append(("revoke_key", key_id))
+        self._keys = [k for k in getattr(self, "_keys", [])
+                    if k["id"] != key_id]
+
 
 class UnreachableClient(FakeClient):
     """A server that answers the login but is gone by the time we ask again."""
@@ -434,3 +453,41 @@ def test_the_page_cannot_promote_itself(tmp_path):
     assert config.plan_tier == "free"
     assert config.is_owner is False
     assert config.plan_features == []
+
+
+# -- API keys ---------------------------------------------------------------
+
+def test_api_keys_need_a_signed_in_client(bridge):
+    # No login yet, so there is no server to ask.
+    assert bridge.handle("apikeys.list")["ok"] is False
+    assert bridge.handle("apikeys.create")["ok"] is False
+
+
+def test_creating_a_key_returns_the_secret_once_and_then_lists_it(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                     "username": "ann", "password": "secret"})
+    made = bridge.handle("apikeys.create", {"label": "laptop"})
+    assert made["ok"] is True
+    assert made["key"].startswith("ker-")       # the secret, shown once
+    # The follow-up list carries metadata only — never the secret again.
+    assert made["keys"][0]["label"] == "laptop"
+    assert "key" not in made["keys"][0]
+
+
+def test_listing_then_revoking_a_key(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                     "username": "ann", "password": "secret"})
+    bridge.handle("apikeys.create", {"label": "one"})
+    bridge.handle("apikeys.create", {"label": "two"})
+    listed = bridge.handle("apikeys.list")
+    assert {k["label"] for k in listed["keys"]} == {"one", "two"}
+    first_id = listed["keys"][0]["id"]
+    out = bridge.handle("apikeys.revoke", {"id": first_id})
+    assert out["ok"] is True
+    assert first_id not in [k["id"] for k in out["keys"]]
+
+
+def test_revoking_without_an_id_is_refused(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                     "username": "ann", "password": "secret"})
+    assert bridge.handle("apikeys.revoke", {})["ok"] is False
