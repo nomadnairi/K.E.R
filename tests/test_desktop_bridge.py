@@ -20,17 +20,32 @@ class FakeClient:
     #: What /auth/me should answer. Tests override it per case.
     profile: dict = {"username": "ann", "owner": False, "tier": "free",
                      "features": ["chat", "memory"]}
+    #: What the root endpoint says this server is. Overridden per case.
+    server_info: dict = {"name": "KER", "version": "9.9.9", "status": "online",
+                        "auth": "accounts", "accounts": True, "signup": True,
+                        "telegram_login": True, "requires_license": False}
 
     def __init__(self, base_url: str, *, token: str = "") -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.calls: list[tuple] = []
 
+    def info(self) -> dict:
+        self.calls.append(("info",))
+        return dict(self.server_info)
+
     def login(self, username: str, password: str) -> str:
         self.calls.append(("login", username, password))
         if password == "wrong":
             raise ApiError(401, "Bad credentials")
         self.token = "token-123"
+        return self.token
+
+    def register(self, username: str, password: str) -> str:
+        self.calls.append(("register", username, password))
+        if username == "taken":
+            raise ApiError(409, "That username is taken.")
+        self.token = "token-new"
         return self.token
 
     def login_with_telegram_code(self, code: str) -> str:
@@ -114,6 +129,97 @@ def test_expired_telegram_code_is_reported(bridge):
     out = bridge.handle("login.telegram", {"server": "http://localhost:8000",
                                            "code": "000000"})
     assert out == {"ok": False, "error": "Code expired"}
+
+
+# -- registering ------------------------------------------------------------
+
+def test_registering_creates_the_account_and_signs_in(tmp_path):
+    class FreshClient(FakeClient):
+        profile = {"username": "bob", "owner": False, "tier": "free",
+                   "features": ["chat", "memory"]}
+
+    bridge = Bridge(AppConfig(), client_factory=FreshClient,
+                    config_dir=tmp_path)
+    out = bridge.handle("login.register", {"server": "http://localhost:8000",
+                                           "username": "bob",
+                                           "password": "hunter2hunter2",
+                                           "password2": "hunter2hunter2"})
+    assert out["ok"] is True and out["tier"] == "free"
+    saved = AppConfig.load(tmp_path)
+    assert saved.auth_token == "token-new"
+    assert saved.username == "bob"
+    # A brand-new account is nobody special: Free tier, ordinary role.
+    assert saved.role == "user" and saved.is_owner is False
+
+
+def test_mistyped_repeat_never_reaches_the_server(bridge):
+    out = bridge.handle("login.register", {"server": "http://localhost:8000",
+                                           "username": "bob",
+                                           "password": "hunter2hunter2",
+                                           "password2": "hunter2hunter3"})
+    assert out["ok"] is False
+    assert "not match" in out["error"]
+    assert bridge.signed_in is False
+
+
+def test_a_taken_username_is_reported_as_the_server_put_it(bridge):
+    out = bridge.handle("login.register", {"server": "http://localhost:8000",
+                                           "username": "taken",
+                                           "password": "hunter2hunter2",
+                                           "password2": "hunter2hunter2"})
+    assert out == {"ok": False, "error": "That username is taken."}
+
+
+def test_registering_needs_all_the_fields(bridge):
+    out = bridge.handle("login.register", {"server": "", "username": "",
+                                           "password": ""})
+    assert out["ok"] is False and bridge.signed_in is False
+
+
+# -- what kind of server is this? -------------------------------------------
+
+def test_the_probe_says_what_the_server_offers(bridge):
+    out = bridge.handle("server.probe", {"server": "http://localhost:8000"})
+    assert out["ok"] is True and out["reachable"] is True
+    assert out["accounts"] is True and out["signup"] is True
+    assert out["telegram_login"] is True
+    assert out["version"] == "9.9.9"
+
+
+def test_the_probe_names_a_server_with_accounts_switched_off(bridge,
+                                                            monkeypatch):
+    """The real cause behind 'invalid or expired code', said out loud."""
+    monkeypatch.setattr(FakeClient, "server_info",
+                        {"name": "KER", "version": "9.9.9",
+                         "auth": "shared-key", "accounts": False,
+                         "signup": False, "telegram_login": False})
+    out = bridge.handle("server.probe", {"server": "http://localhost:8000"})
+    assert out["ok"] is True
+    assert out["accounts"] is False and out["telegram_login"] is False
+
+
+def test_an_older_server_is_read_from_its_auth_field_alone(bridge, monkeypatch):
+    monkeypatch.setattr(FakeClient, "server_info",
+                        {"name": "KER", "version": "1.0.0",
+                         "auth": "accounts"})
+    out = bridge.handle("server.probe", {"server": "http://localhost:8000"})
+    assert out["accounts"] is True and out["telegram_login"] is True
+    assert out["signup"] is False        # unknown means no, never assumed yes
+
+
+def test_the_probe_reports_a_server_that_is_not_there(tmp_path):
+    class Gone(FakeClient):
+        def info(self) -> dict:
+            raise ApiError(0, "Cannot reach server: [Errno 111] refused")
+
+    bridge = Bridge(AppConfig(), client_factory=Gone, config_dir=tmp_path)
+    out = bridge.handle("server.probe", {"server": "http://localhost:9"})
+    assert out["ok"] is False and out["reachable"] is False
+    assert "refused" in out["error"]
+
+
+def test_the_probe_needs_an_address(bridge):
+    assert bridge.handle("server.probe", {"server": " "})["ok"] is False
 
 
 # -- settings ---------------------------------------------------------------

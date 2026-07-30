@@ -200,6 +200,50 @@ class Bridge:
         client.login(username, password)
         return self._remember(client, username=username)
 
+    def _do_server_probe(self, payload: dict) -> dict:
+        """Ask a server what it is before offering a way in.
+
+        This is what turns "Invalid or expired code" into something a person can
+        act on: a server with accounts switched off, or an address where nothing
+        is listening, can be named as such before anyone types anything.
+        """
+        server = str(payload.get("server", "")).strip()
+        if not server:
+            return {"ok": False, "error": "Enter the server address."}
+        try:
+            client = self._client_factory(server)
+            info = client.info()
+        except ApiError as exc:
+            return {"ok": False, "reachable": False, "error": exc.detail}
+        except Exception as exc:  # noqa: BLE001 - a typo in the URL lands here
+            return {"ok": False, "reachable": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "reachable": True,
+            "name": info.get("name") or "KER",
+            "version": info.get("version") or "",
+            # Older servers only reported the "auth" string; read both.
+            "accounts": bool(info.get("accounts",
+                                    info.get("auth") == "accounts")),
+            "signup": bool(info.get("signup")),
+            "telegram_login": bool(info.get("telegram_login",
+                                            info.get("auth") == "accounts")),
+        }
+
+    def _do_login_register(self, payload: dict) -> dict:
+        """Create an account on the server and sign in with it."""
+        server = str(payload.get("server", "")).strip()
+        username = str(payload.get("username", "")).strip()
+        password = str(payload.get("password", ""))
+        if not server or not username or not password:
+            return {"ok": False,
+                    "error": "Fill in server, username and password."}
+        if password != str(payload.get("password2", password)):
+            return {"ok": False, "error": "The two passwords do not match."}
+        client = self._client_factory(server)
+        client.register(username, password)
+        return self._remember(client, username=username)
+
     def _do_login_telegram(self, payload: dict) -> dict:
         server = str(payload.get("server", "")).strip()
         code = str(payload.get("code", "")).strip()

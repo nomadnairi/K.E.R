@@ -217,3 +217,87 @@ def test_the_profile_says_what_is_enforced_and_what_is_packaging():
         assert "pc_access" in me["local_only"]
         assert "images" in me["enforced_server_side"]
         assert not set(me["local_only"]) & set(me["enforced_server_side"])
+
+
+# -- registration ------------------------------------------------------------
+
+def test_registration_is_closed_unless_the_operator_opens_it():
+    """A deployment that sells through the bot wants no open signup form."""
+    with TestClient(_app()) as client:
+        r = client.post("/auth/register",
+                        json={"username": "newbie", "password": "longenough1"})
+        assert r.status_code == 403
+        assert "Telegram" in r.json()["detail"]
+
+
+def test_registering_creates_a_free_account_and_signs_it_in():
+    with TestClient(_app(auth_allow_signup=True)) as client:
+        r = client.post("/auth/register",
+                        json={"username": "newbie", "password": "longenough1"})
+        assert r.status_code == 200, r.text
+        token = r.json()["token"]
+        me = client.get("/auth/me",
+                        headers={"Authorization": f"Bearer {token}"}).json()
+        assert me["username"] == "newbie"
+        assert me["tier"] == "free" and me["owner"] is False
+        # The token works for real requests, not just for /auth/me.
+        assert client.post("/chat", json={"message": "hi"},
+                        headers={"Authorization": f"Bearer {token}"}
+                        ).status_code == 200
+
+
+def test_registration_refuses_a_short_password_and_says_the_length():
+    with TestClient(_app(auth_allow_signup=True,
+                        auth_min_password_length=12)) as client:
+        r = client.post("/auth/register",
+                        json={"username": "newbie", "password": "short"})
+        assert r.status_code == 400
+        assert "12" in r.json()["detail"]
+
+
+def test_registration_refuses_a_two_letter_username():
+    with TestClient(_app(auth_allow_signup=True)) as client:
+        r = client.post("/auth/register",
+                        json={"username": "ab", "password": "longenough1"})
+        assert r.status_code == 400
+
+
+def test_a_taken_username_is_a_conflict_not_a_silent_takeover():
+    with TestClient(_app(auth_allow_signup=True)) as client:
+        _seed(client)
+        r = client.post("/auth/register",
+                        json={"username": "tony", "password": "somethingelse"})
+        assert r.status_code == 409
+        # The existing password still works — nothing was overwritten.
+        assert client.post("/auth/login",
+                        json={"username": "tony", "password": "arcreactor"}
+                        ).status_code == 200
+
+
+# -- the server describes itself --------------------------------------------
+
+def test_the_root_endpoint_says_how_one_gets_in():
+    """The app probes this before offering a login, so it must be truthful."""
+    with TestClient(_app(auth_allow_signup=True)) as client:
+        info = client.get("/").json()
+        assert info["accounts"] is True
+        assert info["auth"] == "accounts"
+        assert info["signup"] is True
+        assert info["telegram_login"] is True
+        assert info["requires_license"] is False
+
+
+def test_a_server_without_accounts_admits_it():
+    """This is what turns 'invalid or expired code' into something actionable."""
+    settings = Settings(anthropic_api_key="k", log_file="", memory_enabled=False,
+                        integrations_enabled=False, goals_enabled=False,
+                        rate_limit_enabled=False, api_key="secret",
+                        auth_enabled=False)
+    engine = JarvisEngine(container=ServiceContainer(
+        settings, llm_client=LLMClient(primary=FakeProvider())))
+    with TestClient(create_app(engine=engine, settings=settings)) as client:
+        info = client.get("/").json()
+        assert info["accounts"] is False
+        assert info["auth"] == "shared-key"
+        assert info["signup"] is False
+        assert info["telegram_login"] is False
