@@ -118,6 +118,10 @@ class JarvisApiClient:
         """Revoke one of the account's keys (effective on the next request)."""
         self._request("DELETE", f"/auth/api-keys/{int(key_id)}")
 
+    def proxy_usage(self) -> dict:
+        """Today's proxy token spend vs the tier's ceiling."""
+        return self._request("GET", "/v1/usage")
+
     def chat(self, message: str, session_id: str = "desktop") -> str:
         out = self._request("POST", "/chat",
                             {"message": message, "session_id": session_id})

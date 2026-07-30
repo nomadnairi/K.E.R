@@ -146,3 +146,11 @@ def test_the_api_keys_screen_shows_the_secret_once():
     html = DESKTOP.read_text(encoding="utf-8")
     assert "JUST_MADE" in html
     assert "copyKey" in html
+
+
+def test_the_api_keys_screen_shows_todays_usage():
+    """A usage card with a spend bar, fed by the proxy's meter."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert "apikeys.usage" in html
+    assert "usageCard" in html
+    assert "Использование сегодня" in html

@@ -321,6 +321,21 @@ class Bridge:
         self.client.revoke_api_key(key_id)
         return {"ok": True, "keys": self.client.list_api_keys()}
 
+    def _do_apikeys_usage(self, _payload: dict) -> dict:
+        """Today's proxy token spend against the tier's ceiling.
+
+        A missing endpoint (the server has the proxy switched off) is reported
+        as unavailable, not as an error the screen has to apologise for.
+        """
+        if self.client is None:
+            return {"ok": False, "error": "Not signed in."}
+        try:
+            return {"ok": True, "usage": self.client.proxy_usage()}
+        except ApiError as exc:
+            if exc.status == 404:
+                return {"ok": True, "usage": None, "unavailable": True}
+            raise
+
     # -- settings -------------------------------------------------------------
 
     def snapshot(self) -> dict:
