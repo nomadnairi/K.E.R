@@ -15,6 +15,7 @@ from pathlib import Path
 
 from jarvis.config.constants import Role
 from jarvis.models.message import Conversation, Message
+from jarvis.security.crypto import KeyProvider, SecretBox
 from jarvis.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -34,9 +35,13 @@ CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 class SQLiteConversationStore:
     """Stores and loads conversation history in a SQLite database."""
 
-    def __init__(self, db_path: str = "data/jarvis.db") -> None:
+    def __init__(self, db_path: str = "data/jarvis.db",
+                 secret_box: SecretBox | None = None) -> None:
         self.db_path = db_path
         self._lock = threading.Lock()
+        # Chat text is encrypted at rest when a key is configured
+        # (KER_DATA_KEY); with no key this is a transparent pass-through.
+        self._box = secret_box if secret_box is not None else KeyProvider.box()
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -52,7 +57,8 @@ class SQLiteConversationStore:
             self._conn.execute(
                 "INSERT INTO messages (session_id, role, content, timestamp) "
                 "VALUES (?, ?, ?, ?)",
-                (session_id, message.role.value, message.content,
+                (session_id, message.role.value,
+                self._box.encrypt(message.content, aad=session_id),
                 message.timestamp.isoformat()),
             )
             self._conn.commit()
@@ -77,7 +83,9 @@ class SQLiteConversationStore:
         conversation = Conversation()
         for row in rows:
             conversation.messages.append(
-                Message(role=Role(row["role"]), content=row["content"])
+                Message(role=Role(row["role"]),
+                        content=self._box.decrypt(row["content"],
+                                                aad=session_id))
             )
         return conversation
 
@@ -105,7 +113,9 @@ class SQLiteConversationStore:
             ).fetchall()
         out: list[dict] = []
         for r in rows:
-            title = (r["title"] or "").strip() or "Диалог"
+            raw_title = self._box.decrypt(r["title"] or "",
+                                        aad=r["session_id"])
+            title = (raw_title or "").strip() or "Диалог"
             out.append({"session_id": r["session_id"],
                         "title": title[:60],
                         "count": int(r["n"]),
