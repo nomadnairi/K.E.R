@@ -259,6 +259,10 @@ class Settings(BaseSettings):
     #: gets every capability and no usage limits — it is the account that runs
     #: the deployment, not a plan anyone can buy.
     owner_username: str = ""
+    #: Owner password. When both this and ``owner_username`` are set, the server
+    #: creates (or resets) the owner account on startup — so the operator just
+    #: signs in, no CLI. Leave empty to manage the owner account by hand.
+    owner_password: str = ""
     #: Refuse sign-in without an active licence. Off by default: there is a
     #: Free tier, and a free user must be able to get in to see what a
     #: subscription would add. Turn it on for a licence-only deployment.

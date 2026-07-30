@@ -90,6 +90,15 @@ def create_app(engine: JarvisEngine | None = None,
         service = LicenseService(
             settings.auth_db_path, token_ttl_hours=settings.auth_token_ttl_hours
         )
+        # The operator gets in with an OWNER_USERNAME / OWNER_PASSWORD pair in
+        # the env — the account is created (or its password realigned) here, so
+        # there is no CLI step to becoming the owner.
+        if settings.owner_username and settings.owner_password:
+            try:
+                service.bootstrap_owner(settings.owner_username,
+                                        settings.owner_password)
+            except Exception as exc:  # noqa: BLE001 - never block startup
+                logger.warning("Owner bootstrap failed: %s", exc)
 
     @asynccontextmanager
     async def lifespan(_app):

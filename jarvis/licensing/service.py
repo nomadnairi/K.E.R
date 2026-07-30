@@ -170,6 +170,27 @@ class LicenseService:
             raise AuthError("Account not found.")
         return self._account_from_row(row)
 
+    def bootstrap_owner(self, username: str, password: str) -> Account | None:
+        """Create the owner account from config, or align its password.
+
+        Called on startup so the operator gets in with nothing more than an
+        ``OWNER_USERNAME`` / ``OWNER_PASSWORD`` pair in the server's env — no
+        CLI, no admin key. The env is the source of truth: an existing account
+        has its password reset to match, and a re-activated one is switched back
+        on. Ownership itself is decided elsewhere (the username matching
+        ``owner_username``); this only guarantees the account exists to log in to.
+        """
+        username = (username or "").strip().lower()
+        if not username or not password:
+            return None
+        existing = self.get_account(username)
+        if existing is None:
+            return self.create_account(username, password)
+        self.change_password(username, password)
+        if not existing.active:
+            self.set_active(username, True)
+        return self._account_row(existing.id)
+
     def get_account(self, username: str) -> Account | None:
         row = self._conn.execute(
             "SELECT * FROM accounts WHERE username = ?",

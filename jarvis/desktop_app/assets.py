@@ -9,6 +9,7 @@ for a file by name.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -16,6 +17,17 @@ from pathlib import Path
 #: separate product and is not listed here on purpose.
 DECK = "desktop.html"
 LOGIN = "desktop_login.html"
+
+#: The server a fresh install points at. An operator selling KER bakes their own
+#: address in here (or via the ``KER_SERVER_URL`` build env) so a customer never
+#: types a server address; left as localhost it suits someone self-hosting.
+DEFAULT_SERVER_URL = os.environ.get("KER_SERVER_URL", "").strip() \
+    or "http://localhost:8000"
+
+
+def default_server_url() -> str:
+    """The address to prefill on a first run (operator-configurable)."""
+    return DEFAULT_SERVER_URL
 
 
 def icon_path(name: str = "ker.ico") -> Path | None:
@@ -92,6 +104,11 @@ def login_strings(config) -> dict:
         "probe_no_signup": tr("probe_no_signup", loc),
         "version_line": f"KER {__version__}",
         "server_url": config.server_url or "",
+        # A real value for the field when nothing is saved yet, so it is never a
+        # deceptively empty box behind a grey placeholder. The operator can bake
+        # their own address here (see DEFAULT_SERVER_URL).
+        "server_default": default_server_url(),
+        "need_server": tr("login_need_server", loc),
         "username_value": config.username or "",
         "theme": config.theme,
     }

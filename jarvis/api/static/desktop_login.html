@@ -257,7 +257,10 @@
   $("go-telegram").querySelector("span").textContent = L.cta_telegram;
   $("go-register").querySelector("span").textContent = L.cta_register;
   text("ver", L.version_line); text("modeNote", L.foot_note);
-  if(L.server_url) $("server").value = L.server_url;
+  // Prefill the address: the last one used, or the built-in default. An empty
+  // field that only shows a grey placeholder reads as already filled, and people
+  // submit a blank server and get "enter the server" — so we put a real value in.
+  $("server").value = L.server_url || L.server_default || "";
   if(L.username_value) $("user").value = L.username_value;
   if(L.theme) document.documentElement.dataset.tv = L.theme;
 
@@ -331,6 +334,15 @@
     b.classList.remove("rippling"); void b.offsetWidth; b.classList.add("rippling");
   });
 
+  //: The one field every way in shares. Empty here is the single most common
+  //: reason a sign-in fails, so it is checked first, in the user's language,
+  //: and the field is pointed at rather than a bare error shown.
+  function serverOrComplain(){
+    const server = $("server").value.trim();
+    if(!server){ showError(L.need_server); $("server").focus(); return null; }
+    return server;
+  }
+
   async function run(btn, action, payload){
     hideError(); busy(btn, true);
     const res = await call(action, payload);
@@ -343,23 +355,25 @@
     showError((res && res.error) || L.failed);
   }
 
-  const signIn = btn => run(btn, "login.password", {
-    server: $("server").value.trim(),
-    username: $("user").value.trim(),
-    password: $("pass").value,
-  });
-  const redeem = btn => run(btn, "login.telegram", {
-    server: $("server").value.trim(),
-    code: $("code").value.trim(),
-  });
+  function signIn(btn){
+    const server = serverOrComplain(); if(!server) return;
+    return run(btn, "login.password", {
+      server, username: $("user").value.trim(), password: $("pass").value,
+    });
+  }
+  function redeem(btn){
+    const server = serverOrComplain(); if(!server) return;
+    return run(btn, "login.telegram", {server, code: $("code").value.trim()});
+  }
   function signUp(btn){
+    const server = serverOrComplain(); if(!server) return;
     // Caught here so the answer is in the user's language; the bridge checks
     // it again, because a page is never the last word on anything.
     if($("rpass").value !== $("rpass2").value){
       showError(L.password_mismatch); $("rpass2").focus(); return;
     }
     return run(btn, "login.register", {
-      server: $("server").value.trim(),
+      server,
       username: $("ruser").value.trim(),
       password: $("rpass").value,
       password2: $("rpass2").value,

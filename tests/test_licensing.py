@@ -234,3 +234,33 @@ def test_validating_stamps_last_used(svc):
     assert svc.list_api_keys(ann.id)[0]["last_used_at"] is None
     svc.validate_api_key(key)
     assert svc.list_api_keys(ann.id)[0]["last_used_at"] is not None
+
+
+# -- owner bootstrap (owner account straight from server env) ----------------
+
+def test_bootstrap_creates_the_owner_account(svc):
+    acc = svc.bootstrap_owner("admin", "s3cret-pass")
+    assert acc is not None and acc.username == "admin"
+    # The operator can now sign in with exactly those credentials.
+    assert svc.authenticate("admin", "s3cret-pass").username == "admin"
+
+
+def test_bootstrap_realigns_the_password_on_an_existing_owner(svc):
+    svc.create_account("admin", "old-pass")
+    svc.bootstrap_owner("admin", "new-pass")
+    assert svc.authenticate("admin", "new-pass").username == "admin"
+    with pytest.raises(AuthError):
+        svc.authenticate("admin", "old-pass")
+
+
+def test_bootstrap_reactivates_a_disabled_owner(svc):
+    svc.create_account("admin", "pw")
+    svc.set_active("admin", False)
+    svc.bootstrap_owner("admin", "pw")
+    assert svc.authenticate("admin", "pw").username == "admin"
+
+
+def test_bootstrap_needs_both_name_and_password(svc):
+    assert svc.bootstrap_owner("admin", "") is None
+    assert svc.bootstrap_owner("", "pw") is None
+    assert svc.get_account("admin") is None
