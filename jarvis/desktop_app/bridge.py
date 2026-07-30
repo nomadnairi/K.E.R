@@ -294,6 +294,33 @@ class Bridge:
             "profile": profile,
         }
 
+    # -- API keys (the credential behind the hosted proxy) --------------------
+
+    def _do_apikeys_list(self, _payload: dict) -> dict:
+        """The account's live keys — metadata only; the secret is never stored."""
+        if self.client is None:
+            return {"ok": False, "error": "Not signed in."}
+        return {"ok": True, "keys": self.client.list_api_keys()}
+
+    def _do_apikeys_create(self, payload: dict) -> dict:
+        """Mint a key; the plaintext comes back once, for the page to show once."""
+        if self.client is None:
+            return {"ok": False, "error": "Not signed in."}
+        label = str(payload.get("label", "")).strip()[:60]
+        key = self.client.create_api_key(label)
+        return {"ok": True, "key": key, "keys": self.client.list_api_keys()}
+
+    def _do_apikeys_revoke(self, payload: dict) -> dict:
+        """Revoke one key; it stops working on the very next request."""
+        if self.client is None:
+            return {"ok": False, "error": "Not signed in."}
+        try:
+            key_id = int(payload.get("id"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Which key?"}
+        self.client.revoke_api_key(key_id)
+        return {"ok": True, "keys": self.client.list_api_keys()}
+
     # -- settings -------------------------------------------------------------
 
     def snapshot(self) -> dict:

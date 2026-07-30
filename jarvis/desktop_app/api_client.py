@@ -104,6 +104,20 @@ class JarvisApiClient:
         """Get a code to link Telegram (send /link CODE to the bot)."""
         return self._request("POST", "/auth/pairing-code")["code"]
 
+    # -- API keys (the credential behind the hosted proxy) --------------------
+
+    def list_api_keys(self) -> list[dict]:
+        """The account's live API keys — metadata only, never the secret."""
+        return self._request("GET", "/auth/api-keys").get("keys", [])
+
+    def create_api_key(self, label: str = "") -> str:
+        """Mint a key; the plaintext is returned once and never again."""
+        return self._request("POST", "/auth/api-keys", {"label": label})["key"]
+
+    def revoke_api_key(self, key_id: int) -> None:
+        """Revoke one of the account's keys (effective on the next request)."""
+        self._request("DELETE", f"/auth/api-keys/{int(key_id)}")
+
     def chat(self, message: str, session_id: str = "desktop") -> str:
         out = self._request("POST", "/chat",
                             {"message": message, "session_id": session_id})
