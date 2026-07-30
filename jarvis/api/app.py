@@ -169,6 +169,7 @@ def create_app(engine: JarvisEngine | None = None,
             "signup": bool(accounts and settings.auth_allow_signup),
             "telegram_login": accounts,
             "requires_license": bool(accounts and settings.auth_require_license),
+            "proxy": bool(accounts and settings.proxy_enabled),
         }
 
     @app.get("/health")
@@ -741,6 +742,9 @@ def create_app(engine: JarvisEngine | None = None,
         if settings.billing_enabled and settings.billing_webhook_secret:
             from jarvis.api.billing_routes import install_billing_routes
             install_billing_routes(app, settings, service)
+        if settings.proxy_enabled:
+            from jarvis.api.proxy_routes import install_proxy_routes
+            install_proxy_routes(app, settings, service, engine)
 
     app.state.engine = engine
     app.state.license_service = service

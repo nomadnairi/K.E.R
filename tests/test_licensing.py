@@ -159,3 +159,78 @@ def test_telegram_login_reuses_existing_account(svc: LicenseService):
 
 def test_telegram_login_bad_code(svc: LicenseService):
     assert svc.redeem_telegram_login("000000") is None
+
+
+# -- API keys (the credential behind "API от меня") --------------------------
+
+def test_api_key_is_minted_validated_and_scoped_to_its_account(svc):
+    ann = svc.create_account("ann", "pw-ann")
+    bob = svc.create_account("bob", "pw-bob")
+    key = svc.create_api_key(ann.id, label="my laptop")
+    assert key.startswith("ker-")
+    who = svc.validate_api_key(key)
+    assert who is not None and who.id == ann.id
+    assert who.username == "ann" and who.id != bob.id
+
+
+def test_api_key_is_stored_hashed_never_in_the_clear(svc):
+    ann = svc.create_account("ann", "pw")
+    key = svc.create_api_key(ann.id)
+    row = svc._conn.execute(
+        "SELECT key_hash, prefix FROM api_keys").fetchone()
+    assert row["key_hash"] != key                 # only the hash is kept
+    assert key.startswith(row["prefix"])          # prefix is a visible slice
+    assert len(row["prefix"]) < len(key)
+
+
+def test_a_bad_or_foreign_key_validates_to_nothing(svc):
+    ann = svc.create_account("ann", "pw")
+    svc.create_api_key(ann.id)
+    assert svc.validate_api_key("") is None
+    assert svc.validate_api_key("sk-not-ours") is None
+    assert svc.validate_api_key("ker-totally-made-up") is None
+
+
+def test_listing_shows_metadata_but_not_the_secret(svc):
+    ann = svc.create_account("ann", "pw")
+    svc.create_api_key(ann.id, label="one")
+    svc.create_api_key(ann.id, label="two")
+    keys = svc.list_api_keys(ann.id)
+    assert {k["label"] for k in keys} == {"one", "two"}
+    for k in keys:
+        assert "key_hash" not in k and "secret" not in k
+        assert k["prefix"].startswith("ker-")
+
+
+def test_revoking_a_key_kills_it_immediately(svc):
+    ann = svc.create_account("ann", "pw")
+    key = svc.create_api_key(ann.id)
+    key_id = svc.list_api_keys(ann.id)[0]["id"]
+    assert svc.revoke_api_key(ann.id, key_id) is True
+    assert svc.validate_api_key(key) is None       # revocation is instant
+    assert svc.list_api_keys(ann.id) == []
+
+
+def test_you_cannot_revoke_someone_elses_key(svc):
+    ann = svc.create_account("ann", "pw")
+    bob = svc.create_account("bob", "pw")
+    svc.create_api_key(ann.id)
+    ann_key_id = svc.list_api_keys(ann.id)[0]["id"]
+    # Bob names Ann's key id; the ownership clause refuses it.
+    assert svc.revoke_api_key(bob.id, ann_key_id) is False
+    assert len(svc.list_api_keys(ann.id)) == 1
+
+
+def test_a_deactivated_account_cannot_use_its_key(svc):
+    ann = svc.create_account("ann", "pw")
+    key = svc.create_api_key(ann.id)
+    svc.set_active("ann", False)
+    assert svc.validate_api_key(key) is None
+
+
+def test_validating_stamps_last_used(svc):
+    ann = svc.create_account("ann", "pw")
+    key = svc.create_api_key(ann.id)
+    assert svc.list_api_keys(ann.id)[0]["last_used_at"] is None
+    svc.validate_api_key(key)
+    assert svc.list_api_keys(ann.id)[0]["last_used_at"] is not None
