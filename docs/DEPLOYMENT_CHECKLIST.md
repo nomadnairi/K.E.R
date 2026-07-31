@@ -12,8 +12,11 @@ security-specific items are expanded in `PRODUCTION_SECURITY_CHECKLIST.md`.
 
 ## 2. TLS / domain (required for real users)
 
-- [ ] Put the API behind **HTTPS**. On a PaaS this is automatic; on a VPS use a
-      reverse proxy with TLS (Caddy or nginx + Let's Encrypt).
+- [x] On a VPS: `docker-compose.prod.yml` provides the reverse proxy with TLS
+      (Nginx + Let's Encrypt, auto-renewing) — see `docs/INFRASTRUCTURE.md` for
+      the full setup and domain/DNS steps. On a PaaS this is automatic instead.
+- [ ] Point DNS at the server and run `deploy/nginx/init-letsencrypt.sh` once
+      (`docs/INFRASTRUCTURE.md` — "Настройка домена").
 - [ ] Never expose plain `http://` to customers — logins and keys would travel
       in clear text.
 - [ ] Point the app's baked default (`KER_SERVER_URL` / `DEFAULT_SERVER_URL`) at
