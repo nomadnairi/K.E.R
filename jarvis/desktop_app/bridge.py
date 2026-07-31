@@ -321,6 +321,86 @@ class Bridge:
         self.client.revoke_api_key(key_id)
         return {"ok": True, "keys": self.client.list_api_keys()}
 
+    # -- MCP servers (Pro: external tool servers) -----------------------------
+
+    def _mcp_doc(self) -> dict:
+        """The user's MCP config as a mutable ``{"mcpServers": {...}}`` dict."""
+        import json
+        raw = (self.config.mcp_servers or "").strip()
+        if not raw:
+            return {"mcpServers": {}}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"mcpServers": {}}
+        servers = data.get("mcpServers", data) if isinstance(data, dict) else {}
+        return {"mcpServers": dict(servers) if isinstance(servers, dict) else {}}
+
+    def _save_mcp(self, doc: dict) -> None:
+        import json
+        self.config.mcp_servers = json.dumps(doc, ensure_ascii=False)
+        self.config.save(self._config_dir)
+        # Rebuilding the engine is the app's job; tell it MCP changed.
+        if self._on_change is not None:
+            try:
+                self._on_change({"mcp_servers"})
+            except Exception as exc:  # noqa: BLE001 - the save itself still stuck
+                logger.warning("MCP post-save hook failed: %s", exc)
+
+    def _do_mcp_list(self, _payload: dict) -> dict:
+        """The configured MCP servers, each with whether its config is valid."""
+        from jarvis.mcp.base import MCPServerConfig
+        doc = self._mcp_doc()
+        servers = []
+        for name, spec in doc["mcpServers"].items():
+            if not isinstance(spec, dict):
+                continue
+            cfg = MCPServerConfig.from_spec(name, spec)
+            servers.append({
+                "name": name,
+                "transport": cfg.transport,
+                "command": cfg.command,
+                "args": list(cfg.args),
+                "url": cfg.url,
+                "valid": cfg.is_valid(),
+            })
+        return {"ok": True, "servers": servers}
+
+    def _do_mcp_add(self, payload: dict) -> dict:
+        """Add or replace one server after checking the config is usable."""
+        from jarvis.mcp.base import MCPServerConfig
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            return {"ok": False, "error": "Give the server a name."}
+        transport = str(payload.get("transport", "stdio")).strip() or "stdio"
+        spec: dict = {"transport": transport}
+        if transport == "stdio":
+            spec["command"] = str(payload.get("command", "")).strip()
+            args = payload.get("args", [])
+            if isinstance(args, str):
+                args = args.split()
+            spec["args"] = [str(a) for a in (args or [])]
+        else:
+            spec["url"] = str(payload.get("url", "")).strip()
+        if not MCPServerConfig.from_spec(name, spec).is_valid():
+            return {"ok": False, "error": (
+                "A stdio server needs a command; an SSE server needs an "
+                "http(s) URL.")}
+        doc = self._mcp_doc()
+        doc["mcpServers"][name] = spec
+        self._save_mcp(doc)
+        return {"ok": True, **self._do_mcp_list({})}
+
+    def _do_mcp_remove(self, payload: dict) -> dict:
+        """Remove one server by name."""
+        name = str(payload.get("name", "")).strip()
+        doc = self._mcp_doc()
+        if name not in doc["mcpServers"]:
+            return {"ok": False, "error": "No server by that name."}
+        del doc["mcpServers"][name]
+        self._save_mcp(doc)
+        return {"ok": True, **self._do_mcp_list({})}
+
     def _do_apikeys_usage(self, _payload: dict) -> dict:
         """Today's proxy token spend against the tier's ceiling.
 

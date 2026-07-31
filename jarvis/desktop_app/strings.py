@@ -79,6 +79,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "login_no_bridge": ("The app isn't answering. Restart KER and try "
                             "again."),
         "login_foot": "The same login works in the bot and in the app",
+        "login_need_server": ("Enter the server address first — where KER is "
+                            "running (e.g. http://localhost:8000)."),
         # What the server said about itself, so a refusal can be explained
         # instead of showing a bare "invalid code".
         "probe_checking": "Checking the server…",
@@ -194,6 +196,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "login_no_bridge": ("Приложение не отвечает. Перезапустите KER и "
                             "попробуйте снова."),
         "login_foot": "Один и тот же логин работает в боте и в приложении",
+        "login_need_server": ("Сначала укажите адрес сервера — где запущен "
+                            "KER (например, http://localhost:8000)."),
         # Что сервер сказал о себе — чтобы отказ можно было объяснить, а не
         # показывать сухое «неверный код».
         "probe_checking": "Проверяем сервер…",
@@ -310,6 +314,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "login_no_bridge": ("Ilova javob bermayapti. KER ni qayta ishga "
                             "tushiring."),
         "login_foot": "Bitta login botda ham, ilovada ham ishlaydi",
+        "login_need_server": ("Avval server manzilini kiriting — KER ishlab "
+                            "turgan joy (masalan, http://localhost:8000)."),
         # Server o'zi haqida nima dedi — rad javobini tushuntirish uchun.
         "probe_checking": "Server tekshirilmoqda…",
         "probe_ready": "{name} {version} — hisoblar yoniq",

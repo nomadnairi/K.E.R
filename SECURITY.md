@@ -51,7 +51,34 @@ and audited. To stay safe:
   token leaks, revoke it (e.g. `/revoke` in @BotFather) and issue a new one.
 - Review the audit log when you enable powerful capabilities.
 
-## Reporting
+## How your data is protected (server deployments)
 
-Found a vulnerability? Please report it privately via
-[@deathgu11](https://t.me/deathgu11) rather than opening a public issue.
+When KER runs as a service with accounts (`AUTH_ENABLED=true`):
+
+- **Passwords** are hashed with **Argon2id** (memory-hard; scrypt fallback).
+  Legacy PBKDF2 hashes are upgraded automatically on the next login. The
+  plaintext password is never stored.
+- **Login tokens, API keys and licence keys** are stored only as **SHA-256
+  hashes**; the plaintext is shown once and never persisted.
+- **Memory, chat history and documents** are encrypted at rest with
+  **AES-256-GCM** when `KER_DATA_KEY` is set (from your secret manager / KMS).
+  The encryption key never lives in source or the repository.
+- **Auth events** (logins, key create/revoke, owner bootstrap) are written to a
+  security audit log with **identifiers and outcomes only** — never secrets.
+- **Local-only capabilities** (files, shell, desktop, MCP, local models) run on
+  the user's own machine; the server never receives those calls.
+
+See `docs/SECURITY_ARCHITECTURE.md` for the full model, and
+`docs/PRODUCTION_SECURITY_CHECKLIST.md` before going live.
+
+## Supported versions
+
+Security fixes land on the latest minor release. Run a current version — the
+desktop app can auto-update, and the server is a `pip install -U` / redeploy.
+
+## Reporting a vulnerability
+
+Found a vulnerability? Please report it **privately** via
+[@deathgu11](https://t.me/deathgu11) rather than opening a public issue, and
+allow reasonable time for a fix before any public disclosure. Include steps to
+reproduce and the affected version. We aim to acknowledge within 72 hours.

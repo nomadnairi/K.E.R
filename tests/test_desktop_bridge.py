@@ -519,3 +519,73 @@ def test_usage_is_unavailable_when_the_server_has_no_proxy(tmp_path):
     # A missing endpoint is "nothing to show", not an error to apologise for.
     assert out["ok"] is True and out["unavailable"] is True
     assert out["usage"] is None
+
+
+# -- MCP servers ------------------------------------------------------------
+
+def test_mcp_starts_empty(bridge):
+    assert bridge.handle("mcp.list") == {"ok": True, "servers": []}
+
+
+def test_adding_a_stdio_server_validates_and_persists(bridge, tmp_path):
+    out = bridge.handle("mcp.add", {"name": "fs", "transport": "stdio",
+                                    "command": "npx",
+                                    "args": "-y server-filesystem /data"})
+    assert out["ok"] is True
+    srv = out["servers"][0]
+    assert srv["name"] == "fs" and srv["transport"] == "stdio"
+    assert srv["command"] == "npx" and srv["valid"] is True
+    assert srv["args"] == ["-y", "server-filesystem", "/data"]
+    # Persisted as a standard mcpServers document the engine can read.
+    import json
+    doc = json.loads(AppConfig.load(tmp_path).mcp_servers)
+    assert "fs" in doc["mcpServers"]
+
+
+def test_adding_an_sse_server(bridge):
+    out = bridge.handle("mcp.add", {"name": "remote", "transport": "sse",
+                                    "url": "https://example.com/sse"})
+    assert out["ok"] is True
+    assert out["servers"][0]["url"] == "https://example.com/sse"
+
+
+def test_a_stdio_server_without_a_command_is_refused(bridge):
+    out = bridge.handle("mcp.add", {"name": "bad", "transport": "stdio"})
+    assert out["ok"] is False
+    assert bridge.handle("mcp.list")["servers"] == []
+
+
+def test_an_sse_server_without_an_http_url_is_refused(bridge):
+    out = bridge.handle("mcp.add", {"name": "bad", "transport": "sse",
+                                    "url": "ftp://nope"})
+    assert out["ok"] is False
+
+
+def test_a_server_needs_a_name(bridge):
+    assert bridge.handle("mcp.add", {"command": "npx"})["ok"] is False
+
+
+def test_removing_a_server(bridge):
+    bridge.handle("mcp.add", {"name": "fs", "command": "npx"})
+    out = bridge.handle("mcp.remove", {"name": "fs"})
+    assert out["ok"] is True and out["servers"] == []
+
+
+def test_removing_an_unknown_server_is_reported(bridge):
+    assert bridge.handle("mcp.remove", {"name": "ghost"})["ok"] is False
+
+
+def test_changing_mcp_tells_the_app_to_rebuild_the_engine(tmp_path):
+    seen: list[set] = []
+    b = Bridge(AppConfig(), client_factory=FakeClient, config_dir=tmp_path,
+            on_change=seen.append)
+    b.handle("mcp.add", {"name": "fs", "command": "npx"})
+    assert {"mcp_servers"} in seen        # the engine must be rebuilt
+
+
+def test_mcp_servers_flow_into_the_engine_settings():
+    from jarvis.desktop_app.config import AppConfig as AC
+    cfg = AC(mcp_servers='{"mcpServers": {"fs": {"command": "npx"}}}')
+    ov = cfg.to_settings_overrides()
+    assert ov["mcp_enabled"] is True
+    assert "fs" in ov["mcp_servers"]

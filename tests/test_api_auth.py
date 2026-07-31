@@ -301,3 +301,17 @@ def test_a_server_without_accounts_admits_it():
         assert info["auth"] == "shared-key"
         assert info["signup"] is False
         assert info["telegram_login"] is False
+
+
+def test_owner_signs_in_straight_from_env_no_cli():
+    """OWNER_USERNAME + OWNER_PASSWORD → the owner account exists at startup."""
+    with TestClient(_app(owner_username="boss",
+                        owner_password="reactor-core-9")) as client:
+        # No admin call, no CLI — just log in.
+        r = client.post("/auth/login",
+                        json={"username": "boss", "password": "reactor-core-9"})
+        assert r.status_code == 200, r.text
+        me = client.get("/auth/me",
+                        headers={"Authorization": f"Bearer {r.json()['token']}"}
+                        ).json()
+        assert me["owner"] is True and me["tier"] == "pro"

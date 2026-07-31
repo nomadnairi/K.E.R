@@ -24,6 +24,7 @@ from pathlib import Path
 
 from jarvis.memory.base import BaseEmbedder, BaseMemoryStore, MemoryRecord
 from jarvis.memory.embeddings import cosine_similarity
+from jarvis.security.crypto import KeyProvider, SecretBox
 from jarvis.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -63,9 +64,13 @@ class SQLiteVectorStore(BaseMemoryStore):
         recency_half_life_days: float = 7.0,
         max_per_session: int = 0,
         dedup_threshold: float = 0.0,
+        secret_box: SecretBox | None = None,
     ) -> None:
         self.embedder = embedder
         self.db_path = db_path
+        # Memory content is encrypted at rest when a key is configured
+        # (KER_DATA_KEY); with no key this is a transparent pass-through.
+        self._box = secret_box if secret_box is not None else KeyProvider.box()
         self.min_score = min_score
         self.recency_weight = max(0.0, min(1.0, recency_weight))
         self.recency_half_life_s = recency_half_life_days * 86400.0
@@ -94,7 +99,7 @@ class SQLiteVectorStore(BaseMemoryStore):
                 (
                     record.session_id,
                     record.kind,
-                    record.content,
+                    self._box.encrypt(record.content, aad=record.session_id),
                     _pack(embedding),
                     record.timestamp.isoformat(),
                     json.dumps(record.metadata),
@@ -156,7 +161,8 @@ class SQLiteVectorStore(BaseMemoryStore):
             final = self._apply_recency(similarity, row["timestamp"], now)
             scored.append(
                 MemoryRecord(
-                    content=row["content"],
+                    content=self._box.decrypt(row["content"],
+                                            aad=row["session_id"]),
                     session_id=row["session_id"],
                     kind=row["kind"],
                     score=final,
@@ -220,7 +226,8 @@ class SQLiteVectorStore(BaseMemoryStore):
             except ValueError:
                 ts = datetime.now(timezone.utc)
             out.append(MemoryRecord(
-                content=row["content"],
+                content=self._box.decrypt(row["content"],
+                                        aad=row["session_id"]),
                 session_id=row["session_id"],
                 kind=row["kind"],
                 timestamp=ts,

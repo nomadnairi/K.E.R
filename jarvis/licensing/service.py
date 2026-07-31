@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 from jarvis.licensing.models import Account, License
+from jarvis.security import events as audit
 
 _PBKDF2_ROUNDS = 200_000
 _SALT_BYTES = 16
@@ -35,29 +36,90 @@ class AuthError(Exception):
 
 
 # -- password hashing ---------------------------------------------------------
+#
+# Argon2id is the default (memory-hard, the modern OWASP/NIST recommendation).
+# It is an optional dependency: where argon2-cffi is unavailable we fall back to
+# scrypt (also memory-hard, standard library), and both readers below still
+# verify the legacy PBKDF2 hashes so existing accounts keep working. On the next
+# successful login a legacy or weaker hash is transparently upgraded — see
+# :func:`needs_rehash` and ``LicenseService.authenticate``.
+
+try:  # pragma: no cover - depends on the environment
+    from argon2 import PasswordHasher
+    _PH: "PasswordHasher | None" = PasswordHasher(
+        time_cost=3, memory_cost=64 * 1024, parallelism=1)
+except Exception:  # noqa: BLE001 - argon2 is optional
+    _PH = None
+
+_SCRYPT_N = 2 ** 15  # 32768: memory-hard cost for the stdlib fallback
+
 
 def hash_password(password: str, *, rounds: int = _PBKDF2_ROUNDS) -> str:
-    """Return a ``algo$rounds$salt$hash`` string for *password*."""
+    """Hash *password* with the strongest scheme available (Argon2id first)."""
     if not password:
         raise AuthError("Password must not be empty.")
+    if _PH is not None:
+        return _PH.hash(password)                      # "$argon2id$..."
     salt = os.urandom(_SALT_BYTES)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, rounds)
-    return f"{_ALGO}${rounds}${salt.hex()}${digest.hex()}"
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=_SCRYPT_N,
+                            r=8, p=1, dklen=32)
+    return f"scrypt${_SCRYPT_N}${salt.hex()}${digest.hex()}"
 
 
-def verify_password(password: str, stored: str) -> bool:
-    """Constant-time check of *password* against a stored hash."""
+def _verify_scrypt(password: str, stored: str) -> bool:
+    try:
+        _algo, n_s, salt_hex, hash_hex = stored.split("$")
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+        digest = hashlib.scrypt(password.encode(), salt=salt, n=int(n_s),
+                                r=8, p=1, dklen=len(expected))
+    except (ValueError, AttributeError):
+        return False
+    return hmac.compare_digest(digest, expected)
+
+
+def _verify_pbkdf2(password: str, stored: str) -> bool:
     try:
         algo, rounds_s, salt_hex, hash_hex = stored.split("$")
         if algo != _ALGO:
             return False
-        rounds = int(rounds_s)
         salt = bytes.fromhex(salt_hex)
         expected = bytes.fromhex(hash_hex)
     except (ValueError, AttributeError):
         return False
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, rounds)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, int(rounds_s))
     return hmac.compare_digest(digest, expected)
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Constant-time check of *password* against any supported hash scheme."""
+    if not isinstance(stored, str) or not stored:
+        return False
+    if stored.startswith("$argon2"):
+        if _PH is None:
+            return False
+        try:
+            return _PH.verify(stored, password)
+        except Exception:  # noqa: BLE001 - any argon2 error is a failed verify
+            return False
+    if stored.startswith("scrypt$"):
+        return _verify_scrypt(password, stored)
+    return _verify_pbkdf2(password, stored)
+
+
+def needs_rehash(stored: str) -> bool:
+    """Whether a valid hash should be upgraded (weaker scheme or stale params)."""
+    if not isinstance(stored, str):
+        return True
+    if stored.startswith("$argon2"):
+        if _PH is None:
+            return False
+        try:
+            return _PH.check_needs_rehash(stored)
+        except Exception:  # noqa: BLE001
+            return False
+    # A non-Argon2 hash (scrypt/pbkdf2) is upgraded once Argon2id is available.
+    return _PH is not None
 
 
 def _token_hash(value: str) -> str:
@@ -150,6 +212,7 @@ class LicenseService:
             self._conn.commit()
         except sqlite3.IntegrityError as exc:
             raise AuthError("That username is already taken.") from exc
+        audit.audit_event(audit.ACCOUNT_CREATED, principal=username)
         return self._account_row(int(cur.lastrowid))
 
     def _account_from_row(self, row: sqlite3.Row) -> Account:
@@ -169,6 +232,31 @@ class LicenseService:
         if row is None:
             raise AuthError("Account not found.")
         return self._account_from_row(row)
+
+    def bootstrap_owner(self, username: str, password: str) -> Account | None:
+        """Create the owner account from config, or align its password.
+
+        Called on startup so the operator gets in with nothing more than an
+        ``OWNER_USERNAME`` / ``OWNER_PASSWORD`` pair in the server's env — no
+        CLI, no admin key. The env is the source of truth: an existing account
+        has its password reset to match, and a re-activated one is switched back
+        on. Ownership itself is decided elsewhere (the username matching
+        ``owner_username``); this only guarantees the account exists to log in to.
+        """
+        username = (username or "").strip().lower()
+        if not username or not password:
+            return None
+        existing = self.get_account(username)
+        if existing is None:
+            audit.audit_event(audit.OWNER_BOOTSTRAP, principal=username,
+                            detail="created")
+            return self.create_account(username, password)
+        self.change_password(username, password)
+        if not existing.active:
+            self.set_active(username, True)
+        audit.audit_event(audit.OWNER_BOOTSTRAP, principal=username,
+                        detail="realigned")
+        return self._account_row(existing.id)
 
     def get_account(self, username: str) -> Account | None:
         row = self._conn.execute(
@@ -221,12 +309,27 @@ class LicenseService:
         # Always run a hash to keep timing uniform for unknown usernames.
         stored = row["password_hash"] if row else hash_password("x")
         if not verify_password(password, stored) or row is None:
+            audit.audit_event(audit.LOGIN_FAIL, principal=username, ok=False,
+                            detail="bad credentials")
             raise AuthError("Invalid username or password.")
         account = self._account_from_row(row)
         if not account.active:
+            audit.audit_event(audit.LOGIN_FAIL, principal=username, ok=False,
+                            detail="account disabled")
             raise AuthError("This account is disabled.")
+        # Transparent upgrade: a legacy PBKDF2/scrypt hash (or stale Argon2
+        # params) is re-hashed with the current scheme now that we hold the
+        # plaintext, so accounts drift to Argon2id without a password reset.
+        if needs_rehash(stored):
+            try:
+                self.change_password(account.username, password)
+            except Exception:  # noqa: BLE001 - login must not fail on an upgrade
+                pass
         if require_license and not self.has_active_license(account.id):
+            audit.audit_event(audit.LOGIN_FAIL, principal=username, ok=False,
+                            detail="no active licence")
             raise AuthError("No active license for this account.")
+        audit.audit_event(audit.LOGIN_OK, principal=account.username)
         return account
 
     # -- login tokens ---------------------------------------------------------
@@ -289,6 +392,8 @@ class LicenseService:
             (user_id, _token_hash(key), display, label.strip()[:60], time.time()),
         )
         self._conn.commit()
+        audit.audit_event(audit.APIKEY_CREATED, principal=f"id:{user_id}",
+                        detail=f"prefix={display}")
         return key
 
     def validate_api_key(self, key: str) -> Account | None:
@@ -340,6 +445,9 @@ class LicenseService:
             (key_id, user_id),
         )
         self._conn.commit()
+        if cur.rowcount > 0:
+            audit.audit_event(audit.APIKEY_REVOKED, principal=f"id:{user_id}",
+                            detail=f"key_id={key_id}")
         return cur.rowcount > 0
 
     # -- licenses -------------------------------------------------------------

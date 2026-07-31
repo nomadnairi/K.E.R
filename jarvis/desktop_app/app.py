@@ -520,6 +520,7 @@ def run_app() -> int:
             "telegram_send_enabled", "telegram_channel", "search_enabled",
             "search_provider", "tavily_api_key", "exa_api_key",
             "brave_api_key", "perplexity_api_key", "serpapi_key",
+            "mcp_servers",
         })
 
         def on_settings_changed(self, changed: set[str]) -> None:

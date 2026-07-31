@@ -90,9 +90,27 @@ def create_app(engine: JarvisEngine | None = None,
         service = LicenseService(
             settings.auth_db_path, token_ttl_hours=settings.auth_token_ttl_hours
         )
+        # The operator gets in with an OWNER_USERNAME / OWNER_PASSWORD pair in
+        # the env — the account is created (or its password realigned) here, so
+        # there is no CLI step to becoming the owner.
+        if settings.owner_username and settings.owner_password:
+            try:
+                service.bootstrap_owner(settings.owner_username,
+                                        settings.owner_password)
+            except Exception as exc:  # noqa: BLE001 - never block startup
+                logger.warning("Owner bootstrap failed: %s", exc)
 
     @asynccontextmanager
     async def lifespan(_app):
+        # Surface the deployment's security posture at startup so an operator
+        # sees anything risky (unauthenticated API, encryption off, docs open).
+        try:
+            from jarvis.security.audit import audit_settings
+            for finding in audit_settings(settings):
+                if finding.severity in ("high", "medium"):
+                    logger.warning("security: %s", finding)
+        except Exception as exc:  # noqa: BLE001 - a check must not block startup
+            logger.debug("security self-check skipped: %s", exc)
         await engine.start()
         try:
             yield
@@ -101,8 +119,14 @@ def create_app(engine: JarvisEngine | None = None,
             if service is not None:
                 service.close()
 
+    # In production the OpenAPI docs/schema are turned off so the API surface is
+    # not published to anonymous callers.
+    _docs = settings.api_docs_enabled
     app = FastAPI(title=f"{settings.assistant_name} API", version=__version__,
-                  lifespan=lifespan)
+                  lifespan=lifespan,
+                  docs_url="/docs" if _docs else None,
+                  redoc_url="/redoc" if _docs else None,
+                  openapi_url="/openapi.json" if _docs else None)
 
     # Every interface is a page on some other origin — the desktop app's own
     # window, a locally run dashboard — so without this the browser refuses the
