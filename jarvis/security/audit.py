@@ -87,6 +87,35 @@ def audit_settings(settings: Settings) -> list[SecurityFinding]:
             "info", "telegram",
             "No TELEGRAM_ALLOWED_USERS — the bot is open to everyone."))
 
+    # Data-at-rest encryption (accounts imply real user data worth protecting).
+    from jarvis.security.crypto import KeyProvider
+    if s.auth_enabled and KeyProvider.load() is None:
+        out.append(SecurityFinding(
+            "medium", "encryption",
+            "KER_DATA_KEY is not set — memory, chats and documents are stored "
+            "in plaintext. Set a key (from a secret manager) to encrypt at rest."))
+
+    # OpenAPI surface published to anonymous callers.
+    if s.api_docs_enabled:
+        out.append(SecurityFinding(
+            "low", "api",
+            "API_DOCS_ENABLED is ON — /docs and /openapi.json are public. Turn "
+            "off in production."))
+
+    # Wildcard CORS on an internet-facing API.
+    if s.api_cors_origins.strip() == "*":
+        out.append(SecurityFinding(
+            "low", "cors",
+            "API_CORS_ORIGINS is '*' — any web origin may call the API. Narrow "
+            "it to your own origins in production."))
+
+    # Owner account bootstrapped from env — fine, but flag a short password.
+    if s.owner_username and s.owner_password and len(s.owner_password) < 12:
+        out.append(SecurityFinding(
+            "medium", "owner",
+            "OWNER_PASSWORD is short (<12 chars) — use a long, unique password "
+            "for the account that unlocks everything."))
+
     order = {"high": 0, "medium": 1, "low": 2, "info": 3}
     out.sort(key=lambda f: order[f.severity])
     return out

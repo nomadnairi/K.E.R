@@ -246,6 +246,9 @@ class Settings(BaseSettings):
     #: without this the browser blocks every request. Calls still need a key;
     #: narrow this when the API faces the internet.
     api_cors_origins: str = "*"
+    #: Serve the interactive OpenAPI docs (/docs, /redoc, /openapi.json). Handy
+    #: in development; turn OFF in production so the API surface isn't published.
+    api_docs_enabled: bool = True
 
     # --- Accounts & licensing (per-user login for exe/apk clients) ---
     #: Enable username/password accounts + license checks on the API.
