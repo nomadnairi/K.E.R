@@ -96,6 +96,96 @@ async def test_tool_loop_stops_at_max_rounds(settings):
     assert len(provider.calls) == 3
 
 
+@pytest.mark.asyncio
+async def test_voice_source_stops_at_the_shorter_voice_round_cap(settings):
+    # A voice-originated turn is capped by voice_max_tool_rounds, not the
+    # (longer) default — independent of the setting above.
+    settings.max_tool_rounds = 5
+    settings.voice_max_tool_rounds = 1
+    provider = FakeProvider(
+        results=[make_tool_call_result("calculator", {"expression": "1+1"})] * 10
+    )
+    engine = build_engine(settings, provider)
+    await engine.process(Request(text="loop forever", source="voice"))
+    assert len(provider.calls) == 1
+    # A plain (non-voice) request on the same engine still gets the full budget.
+    await engine.process(Request(text="loop forever again"))
+    assert len(provider.calls) == 1 + 5
+
+
+@pytest.mark.asyncio
+async def test_voice_source_prefers_the_fast_model(settings):
+    settings.llm_model_fast = "fast-model"
+    provider = FakeProvider(default_reply="ok")
+    engine = build_engine(settings, provider)
+
+    await engine.process(Request(text="hi", source="voice"))
+    assert provider.models[-1] == "fast-model"
+
+    await engine.process(Request(text="hi"))  # cli/text: unaffected
+    assert provider.models[-1] is None
+
+
+@pytest.mark.asyncio
+async def test_tool_metadata_reaches_the_final_response(settings):
+    from jarvis.skills.base import BaseSkill, SkillResult
+    from jarvis.skills.registry import SkillRegistry
+
+    class _StubSkill(BaseSkill):
+        name = "stub_tool"
+        description = "test-only"
+        parameters = {"type": "object", "properties": {}}
+
+        def can_handle(self, text: str) -> bool:
+            return False
+
+        async def handle(self, text: str, context=None) -> SkillResult:
+            return SkillResult.not_handled()
+
+        async def execute(self, context=None, **_: object) -> SkillResult:
+            return SkillResult(text="done", metadata={"artifact": "xyz"})
+
+    registry = SkillRegistry()
+    registry.register(_StubSkill())
+    provider = FakeProvider(
+        default_reply="Here it is.",
+        results=[make_tool_call_result("stub_tool", {})],
+    )
+    from jarvis.core.container import ServiceContainer
+    from jarvis.core.engine import JarvisEngine
+    from jarvis.llm.client import LLMClient
+
+    container = ServiceContainer(settings, llm_client=LLMClient(primary=provider),
+                                skill_registry=registry)
+    engine = JarvisEngine(container=container)
+
+    response = await engine.process(Request(text="use the stub tool"))
+    assert response.metadata == {"artifact": "xyz"}
+
+
+@pytest.mark.asyncio
+async def test_multiple_tool_calls_in_one_round_all_execute(settings):
+    from jarvis.llm.base import LLMResult
+    from jarvis.llm.tools import ToolCall
+
+    provider = FakeProvider(
+        default_reply="Both done.",
+        results=[LLMResult(
+            text="", model="fake-model", provider="fake", stop_reason="tool_use",
+            output_tokens=3,
+            tool_calls=[
+                ToolCall(id="call_1", name="calculator", arguments={"expression": "1+1"}),
+                ToolCall(id="call_2", name="calculator", arguments={"expression": "2+2"}),
+            ],
+        )],
+    )
+    engine = build_engine(settings, provider)
+    response = await engine.process(Request(text="compute two things"))
+    assert response.text == "Both done."
+    # Both tool calls from the single round were executed (not just the first).
+    assert "[tool_results x2]" in provider.calls[-1][-1]["content"]
+
+
 # -- streaming --------------------------------------------------------------
 
 

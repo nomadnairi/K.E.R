@@ -317,24 +317,41 @@ class JarvisEngine:
         await self.state.transition(AssistantState.THINKING)
         session.conversation.add_user(request.text)
 
+        is_voice = request.source == "voice"
+        extra_context = await self._context(request.text, session.session_id)
+        if is_voice:
+            hint = ("This reply will be read aloud; answer in 2-4 sentences "
+                    "unless the user asked for detail.")
+            extra_context = f"{extra_context}\n\n{hint}" if extra_context else hint
         system = self.prompts.system_prompt(
-            extra_context=await self._context(request.text, session.session_id),
+            extra_context=extra_context,
             language=self._language(session),
             assistant_name=self._assistant_name(session),
         )
         tools = self.skills.tool_specs()
         model_id, profile = self._model_selection(session)
         override = self._byok_provider(session)
-        # A specific catalog model wins everywhere (incl. on a BYOK key); else
-        # BYOK uses its own default and the router picks a tier.
-        model = model_id or (None if override else self.router.model_for(request.text))
+        # A specific catalog model wins everywhere (incl. on a BYOK key); a
+        # voice turn prefers the fast tier next (kept snappy for speech);
+        # otherwise BYOK uses its own default and the router picks a tier.
+        if model_id:
+            model = model_id
+        elif override:
+            model = None
+        elif is_voice and self.settings.llm_model_fast:
+            model = self.settings.llm_model_fast
+        else:
+            model = self.router.model_for(request.text)
         messages = session.conversation.to_provider_format()
         total_tokens = 0
+        tool_metadata: dict = {}
         result = None
+        rounds = (self.settings.voice_max_tool_rounds if is_voice
+                else self.settings.max_tool_rounds)
 
         with measure() as sw:
             await self.bus.emit(EventType.LLM_REQUEST, source=self.settings.llm_provider)
-            for _ in range(self.settings.max_tool_rounds):
+            for _ in range(rounds):
                 result = await self.llm.complete(
                     messages, system=system, tools=tools, model=model,
                     profile=profile, override=override,
@@ -345,7 +362,9 @@ class JarvisEngine:
                     break
 
                 await self.state.transition(AssistantState.EXECUTING)
-                tool_results = await self._run_tools(result)
+                tool_results, round_metadata = await self._run_tools(
+                    result, session.scratch)
+                tool_metadata.update(round_metadata)
                 messages = messages + self.llm.continuation_messages(result, tool_results)
                 await self.state.transition(AssistantState.THINKING)
 
@@ -362,27 +381,41 @@ class JarvisEngine:
             request_id=request.request_id,
             latency_ms=sw.elapsed_ms,
             tokens=total_tokens,
+            metadata=tool_metadata,
         )
 
-    async def _run_tools(self, result) -> list[ToolResult]:
-        """Execute every tool call requested by the model."""
-        tool_results: list[ToolResult] = []
-        for call in result.tool_calls:
+    async def _run_tools(
+        self, result, context: dict | None = None
+    ) -> tuple[list[ToolResult], dict]:
+        """Execute every tool call requested by the model, concurrently.
+
+        Calls within one round come from a single model completion and are
+        independent of each other by construction, so running them with
+        ``asyncio.gather`` is safe and cuts round-trip latency — a real win
+        shared by every caller (text, voice, API, CLI), not only voice.
+        """
+
+        async def one(call) -> tuple[ToolResult, dict]:
             await self.bus.emit(EventType.TOOL_CALL, source=call.name,
                                 arguments=call.arguments)
             try:
-                skill_result = await self.skills.invoke_tool(call.name, call.arguments)
-                content, is_error = skill_result.text, False
+                skill_result = await self.skills.invoke_tool(
+                    call.name, call.arguments, context=context)
+                content, is_error, metadata = skill_result.text, False, skill_result.metadata
             except JarvisError as exc:
-                content, is_error = f"Tool error: {exc}", True
+                content, is_error, metadata = f"Tool error: {exc}", True, {}
                 await self.bus.emit(EventType.SKILL_FAILED, source=call.name,
                                     error=str(exc))
-            tool_results.append(
-                ToolResult(call_id=call.id, name=call.name, content=content,
-                        is_error=is_error)
-            )
             await self.bus.emit(EventType.TOOL_RESULT, source=call.name)
-        return tool_results
+            return (ToolResult(call_id=call.id, name=call.name, content=content,
+                            is_error=is_error), metadata)
+
+        pairs = await asyncio.gather(*(one(call) for call in result.tool_calls))
+        tool_results = [p[0] for p in pairs]
+        merged_metadata: dict = {}
+        for _, metadata in pairs:
+            merged_metadata.update(metadata)
+        return tool_results, merged_metadata
 
     # -- memory helpers -----------------------------------------------------
 

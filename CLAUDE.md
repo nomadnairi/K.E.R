@@ -36,3 +36,22 @@ only when a release is actually about to be cut.
 
 If unsure which bucket a change falls into, ask rather than guessing and
 pushing to the wrong repo.
+
+## Pending — bring these up again
+
+- **Domain / DNS / real HTTPS.** User has no domain yet (paused
+  01.08.2026). `docker-compose.prod.yml` + `deploy/nginx/` are ready and
+  waiting (`CERTBOT_STAGING=1`) — see `docs/INFRASTRUCTURE.md`. Once a
+  domain exists: DNS A record → `2.26.80.6` (or whatever the VPS IP is by
+  then) → `deploy/nginx/init-letsencrypt.sh` on the VPS. **Remind the user
+  about this periodically until it's done** — they explicitly asked not to
+  let it drop.
+
+## Design principle for future exe/desktop-control work (not started yet)
+
+When the desktop app's "do this on my PC" commands (e.g. "open YouTube") get
+built out: **no hardcoded command table.** The user was explicit — this is
+not "match the phrase 'open X' in code and run a scripted action," it's the
+LLM recognizing intent and invoking a real tool call (agentic, via the
+existing tool-calling/Desktop Control plumbing), the same way any other tool
+use works in this codebase. Don't regress to a keyword/regex command parser.

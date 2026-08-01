@@ -80,6 +80,9 @@ class Settings(BaseSettings):
 
     #: Max agentic tool-calling rounds before returning to the user.
     max_tool_rounds: int = Field(default=5, gt=0, le=20)
+    #: Same, but for voice-originated turns (Request.source == "voice") —
+    #: fewer round trips keeps a spoken reply from taking a minute or more.
+    voice_max_tool_rounds: int = Field(default=2, gt=0, le=20)
     #: Max concurrent sessions kept in memory (LRU-evicted beyond this).
     max_sessions: int = Field(default=1000, gt=0)
 

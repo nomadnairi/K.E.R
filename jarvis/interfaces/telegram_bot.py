@@ -90,7 +90,11 @@ async def generate_reply(engine: JarvisEngine, user_id: int, text: str,
                         model_id: str | None = None,
                         byok: dict | None = None,
                         assistant_name: str | None = None,
-                        usage=None) -> str:
+                        usage=None,
+                        source: str = "cli",
+                        plan_images: bool = True,
+                        return_metadata: bool = False,
+                        ) -> str | tuple[str, dict]:
     """Produce the assistant's reply for a Telegram user (testable core).
 
     When ``locale`` is given (and ``match_input_language`` is False), the
@@ -98,6 +102,14 @@ async def generate_reply(engine: JarvisEngine, user_id: int, text: str,
     ``match_input_language=True`` so the reply matches the language the user
     actually spoke, whatever it is. ``model_profile`` picks the user's chosen
     AI. If a ``usage`` store is given, the turn's token count is recorded.
+
+    ``source`` flows onto the engine :class:`Request` (e.g. ``"voice"`` gets a
+    faster model / shorter tool-round budget / a "keep it brief" prompt hint —
+    see :meth:`JarvisEngine._ask_llm`). ``plan_images`` gates the
+    ``generate_image`` tool for this turn. ``return_metadata=True`` returns
+    ``(text, metadata)`` instead of bare text, so a caller can pick up
+    tool-produced artifacts (e.g. a generated image) — default ``False``
+    keeps every existing caller's return type unchanged.
     """
     from jarvis.models.response import Request
 
@@ -123,14 +135,19 @@ async def generate_reply(engine: JarvisEngine, user_id: int, text: str,
         session.scratch["byok"] = byok
     else:
         session.scratch.pop("byok", None)
+    session.scratch["plan_images"] = plan_images
     try:
-        response = await engine.process(Request(text=text, session_id=session_id))
+        response = await engine.process(
+            Request(text=text, session_id=session_id, source=source))
         if usage is not None:
             usage.record(user_id, tokens=response.tokens)
+        if return_metadata:
+            return response.text, response.metadata
         return response.text
     except JarvisError as exc:
         logger.error("Reply failed for user %s: %s", user_id, exc)
-        return t("error", locale, error=str(exc))
+        error_text = t("error", locale, error=str(exc))
+        return (error_text, {}) if return_metadata else error_text
 
 
 async def with_typing(bot, chat_id, coro):
@@ -868,7 +885,7 @@ async def run(settings: Settings | None = None) -> None:
             )
             if integration_limit_reached(_user_plan(user.id),
                                         user_int_store.count(user.id)):
-                await _show_plans(callback, *bm.screen_plans(
+                await _show_plans(callback, *bm.screen_plans_hub(
                     locale, plans, _user_plan(user.id).name))
                 return
             kind = parts[2]
@@ -926,7 +943,7 @@ async def run(settings: Settings | None = None) -> None:
             tier = _user_plan(user.id).name
             if not mc.unlocked(model, tier):
                 # Locked for this tier — send them to the Tariffs screen.
-                await _show_plans(callback, *bm.screen_plans(locale, plans, tier))
+                await _show_plans(callback, *bm.screen_plans_hub(locale, plans, tier))
                 return
             prefs.set_model_id(user.id, model.slug)
             prefs.set_model(user.id, "")  # a specific model supersedes a profile
@@ -939,7 +956,7 @@ async def run(settings: Settings | None = None) -> None:
             # Image generation is a Plus/Pro feature; free users get the upsell.
             plan = _user_plan(user.id)
             if not plan.images:
-                await _show_plans(callback, *bm.screen_plans(locale, plans, plan.name))
+                await _show_plans(callback, *bm.screen_plans_hub(locale, plans, plan.name))
                 return
             engine.session(session_id_for(user.id)).scratch["awaiting_image"] = True
             await callback.message.answer(t("image_ask", locale))
@@ -1051,8 +1068,12 @@ async def run(settings: Settings | None = None) -> None:
             await _edit(callback, "🗑 " + t("forget_done", locale),
                         [[(t("menu_back", locale), "m:memory")]])
         elif action == "plans":
-            await _show_plans(callback, *bm.screen_plans(
+            await _show_plans(callback, *bm.screen_plans_hub(
                 locale, plans, _user_plan(user.id).name))
+        elif action == "plandetail":
+            tier = parts[2]
+            await _show_plans(callback, *bm.screen_plan_detail(
+                locale, plans, _user_plan(user.id).name, tier))
         elif action == "buy":
             tier = parts[2] if len(parts) > 2 else None
             await _send_invoice(callback.message, locale, tier)
@@ -1238,17 +1259,28 @@ async def run(settings: Settings | None = None) -> None:
             await _make_image(message, message.text, locale)
             return
         # Keep "typing…" alive for the whole (possibly tool-using) generation.
-        reply = await with_typing(message.bot, message.chat.id, generate_reply(
+        reply, meta = await with_typing(message.bot, message.chat.id, generate_reply(
             engine, message.from_user.id, message.text, locale,
             model_profile=prefs.get_model(message.from_user.id),
             model_id=prefs.get_model_id(message.from_user.id),
             byok=prefs.get_byok(message.from_user.id),
             assistant_name=prefs.get_assistant_name(message.from_user.id),
             usage=usage,
+            plan_images=_user_plan(message.from_user.id).images,
+            return_metadata=True,
         ))
         # LLM output is plain text — disable HTML parsing to avoid entity errors.
         for chunk in split_message(reply):
             await message.answer(chunk, parse_mode=None)
+        # The model may have called the generate_image tool mid-conversation
+        # (no "Image" button needed — see jarvis/media/tools.py).
+        image_b64 = meta.get("image_png_b64")
+        if image_b64:
+            import base64
+
+            from aiogram.types import BufferedInputFile
+            await message.answer_photo(
+                BufferedInputFile(base64.b64decode(image_b64), "jarvis.png"))
 
     @dp.message(F.voice)
     async def _voice(message: "Message") -> None:
@@ -1265,35 +1297,53 @@ async def run(settings: Settings | None = None) -> None:
             return
         prefs.touch(message.from_user.id, message.chat.id)
 
-        await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+        await with_typing(message.bot, message.chat.id, _voice_pipeline(
+            message, locale, usage))
+
+    async def _voice_pipeline(message: "Message", locale: str, usage) -> None:
+        """The STT → LLM → TTS round trip for one voice message, timed stage
+        by stage (logged, not surfaced to the user) so a slow turn can be
+        diagnosed instead of just felt.
+        """
+        from jarvis.utils.timing import measure
+
         try:
-            file = await message.bot.get_file(message.voice.file_id)
-            buffer = await message.bot.download_file(file.file_path)
-            transcription = await voice.transcribe(buffer.read())
+            with measure() as sw_stt:
+                file = await message.bot.get_file(message.voice.file_id)
+                buffer = await message.bot.download_file(file.file_path)
+                transcription = await voice.transcribe(buffer.read())
         except Exception as exc:  # noqa: BLE001 - surface STT failures to the user
             logger.error("Voice transcription failed: %s", exc)
             await message.answer(t("error", locale, error=str(exc)), parse_mode=None)
             return
+        logger.info("Voice: download+STT took %.0fms", sw_stt.elapsed_ms)
 
         if not transcription.text:
             return
 
-        # Reply in whatever language the user actually spoke.
-        reply = await generate_reply(
-            engine, message.from_user.id, transcription.text, locale,
-            match_input_language=True,
-            model_profile=prefs.get_model(message.from_user.id),
-            model_id=prefs.get_model_id(message.from_user.id),
-            byok=prefs.get_byok(message.from_user.id),
-            assistant_name=prefs.get_assistant_name(message.from_user.id),
-            usage=usage,
-        )
+        # Reply in whatever language the user actually spoke. source="voice"
+        # gets a faster model / fewer tool-call rounds / a "keep it brief"
+        # prompt hint from the engine — see JarvisEngine._ask_llm.
+        with measure() as sw_llm:
+            reply = await generate_reply(
+                engine, message.from_user.id, transcription.text, locale,
+                match_input_language=True,
+                model_profile=prefs.get_model(message.from_user.id),
+                model_id=prefs.get_model_id(message.from_user.id),
+                byok=prefs.get_byok(message.from_user.id),
+                assistant_name=prefs.get_assistant_name(message.from_user.id),
+                usage=usage,
+                source="voice",
+            )
+        logger.info("Voice: LLM reply took %.0fms", sw_llm.elapsed_ms)
         for chunk in split_message(reply):
             await message.answer(chunk, parse_mode=None)
 
         if settings.voice_replies and voice.tts_available():
             try:
-                audio = await voice.synthesize(reply, transcription.language)
+                with measure() as sw_tts:
+                    audio = await voice.synthesize(reply, transcription.language)
+                logger.info("Voice: TTS took %.0fms", sw_tts.elapsed_ms)
                 out = BufferedInputFile(audio, f"reply.{voice.tts_ext}")
                 if voice.tts_is_voice_note:
                     await message.answer_voice(out)

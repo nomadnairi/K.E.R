@@ -11,7 +11,12 @@ from jarvis.billing import (
     resolve_plan,
     tier_for,
 )
-from jarvis.interfaces.bot_menu import limit_screen, plan_status, screen_plans
+from jarvis.interfaces.bot_menu import (
+    limit_screen,
+    plan_status,
+    screen_plan_detail,
+    screen_plans_hub,
+)
 
 
 def _flat(rows):
@@ -83,21 +88,33 @@ def test_plan_status_line():
     assert "unlimited" in plan_status("en", plans[PRO], used_today=0)
 
 
-def test_screen_plans_offers_upgrades_not_current():
+def test_screen_plans_hub_lists_every_tier_and_drills_down():
     plans = default_plans()
-    text, rows = screen_plans("en", plans, current_tier=FREE)
-    assert "Plans" in text and "Free" in text and "Pro" in text
+    text, rows = screen_plans_hub("en", plans, current_tier=FREE)
+    assert "Plans" in text
     flat = _flat(rows)
-    # Free user is offered Plus and Pro.
-    assert "m:buy:plus" in flat and "m:buy:pro" in flat
-    # A Pro user is offered nothing to buy (already top tier).
-    _t, rows_pro = screen_plans("en", plans, current_tier=PRO)
-    flat_pro = _flat(rows_pro)
-    assert "m:buy:plus" not in flat_pro and "m:buy:pro" not in flat_pro
+    # One button per tier, drilling into a detail screen — no card bodies or
+    # buy buttons directly on the hub.
+    assert "m:plandetail:free" in flat
+    assert "m:plandetail:plus" in flat
+    assert "m:plandetail:pro" in flat
+    assert "m:buy:plus" not in flat and "m:buy:pro" not in flat
+
+
+def test_screen_plan_detail_offers_upgrades_not_current():
+    plans = default_plans()
+    text, rows = screen_plan_detail("en", plans, current_tier=FREE, tier="pro")
+    assert "Pro" in text
+    assert "m:buy:pro" in _flat(rows)
+    # Back goes to the hub, not straight to main.
+    assert "m:plans" in _flat(rows)
+    # A Pro user looking at their own tier is offered nothing to buy.
+    _t, rows_pro = screen_plan_detail("en", plans, current_tier=PRO, tier="pro")
+    assert "m:buy:pro" not in _flat(rows_pro)
 
 
 def test_plans_banner_exists_and_caption_fits():
-    # The Tariffs screen is sent as a photo; captions cap at 1024 chars.
+    # The Tariffs screens are sent as a photo; captions cap at 1024 chars.
     from pathlib import Path
 
     banner = (Path(__file__).resolve().parents[1]
@@ -105,13 +122,16 @@ def test_plans_banner_exists_and_caption_fits():
     assert banner.exists() and banner.stat().st_size > 0
     plans = default_plans()
     for loc in ("en", "ru", "uz"):
-        text, _ = screen_plans(loc, plans, current_tier=FREE)
+        text, _ = screen_plans_hub(loc, plans, current_tier=FREE)
         assert len(text) <= 1024
+        for tier in (FREE, "plus", PRO):
+            dtext, _ = screen_plan_detail(loc, plans, current_tier=FREE, tier=tier)
+            assert len(dtext) <= 1024
 
 
 def test_limit_screen_points_to_plans():
     plans = default_plans()
-    text, rows = screen_plans("ru", plans, current_tier=FREE)
+    text, rows = screen_plans_hub("ru", plans, current_tier=FREE)
     assert "Тарифы" in text
     ltext, lrows = limit_screen("en", plans[FREE])
     assert "limit" in ltext.lower()

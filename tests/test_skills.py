@@ -105,6 +105,33 @@ async def test_invoke_unknown_tool_raises():
         await reg.invoke_tool("nope", {})
 
 
+@pytest.mark.asyncio
+async def test_invoke_tool_passes_context_through():
+    class _ContextAwareSkill(BaseSkill):
+        name = "ctx_probe"
+        description = "test-only"
+        parameters = {"type": "object", "properties": {}}
+
+        def can_handle(self, text: str) -> bool:
+            return False
+
+        async def handle(self, text: str, context=None) -> SkillResult:
+            return SkillResult.not_handled()
+
+        async def execute(self, context=None, **_: object) -> SkillResult:
+            return SkillResult(text=str(context))
+
+    reg = SkillRegistry()
+    reg.register(_ContextAwareSkill())
+    reg.register(CalculatorSkill())
+    result = await reg.invoke_tool("ctx_probe", {}, context={"scratch": "value"})
+    assert result.text == "{'scratch': 'value'}"
+    # A skill that ignores context (like every built-in) isn't broken by it.
+    result2 = await reg.invoke_tool("calculator", {"expression": "1+1"},
+                                    context={"anything": True})
+    assert "2" in result2.text
+
+
 def test_calculator_safe_eval():
     assert evaluate("2 + 3 * 4") == 14
     assert evaluate("(1+1) ** 10") == 1024

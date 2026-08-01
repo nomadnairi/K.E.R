@@ -223,6 +223,13 @@ class ServiceContainer:
         if self.search is not None:
             from jarvis.search.tools import search_skills
             registry.register_many(search_skills(self.search))
+        # Expose the generate_image tool (gated by IMAGE_ENABLED + a usable key).
+        if self._settings.image_enabled:
+            from jarvis.media.image_service import ImageService
+            from jarvis.media.tools import image_skills
+            image_service = ImageService.from_settings(self._settings)
+            if image_service.available():
+                registry.register_many(image_skills(image_service))
         # Expose the run_agent tool (delegating to an autonomous sub-agent).
         if self._settings.agents_enabled:
             from jarvis.agents.tools import RunAgentSkill

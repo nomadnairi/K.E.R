@@ -81,13 +81,20 @@ class SkillRegistry:
         specs = [s.as_tool_spec() for s in self._skills.values()]
         return [s for s in specs if s is not None]
 
-    async def invoke_tool(self, name: str, arguments: dict) -> SkillResult:
-        """Execute the tool named ``name`` with ``arguments``."""
+    async def invoke_tool(self, name: str, arguments: dict,
+                        context: dict | None = None) -> SkillResult:
+        """Execute the tool named ``name`` with ``arguments``.
+
+        ``context`` is the caller's session scratch dict — the same object
+        already passed to the fast path's :meth:`BaseSkill.handle`. Every
+        built-in skill's ``execute`` already ends in a ``**kwargs`` catch-all,
+        so passing it costs nothing for skills that don't care about it.
+        """
         skill = self._skills.get(name)
         if skill is None:
             raise SkillNotFoundError(f"No skill/tool named {name!r}.")
         try:
-            return await skill.execute(**arguments)
+            return await skill.execute(**arguments, context=context)
         except SkillExecutionError:
             raise
         except Exception as exc:  # noqa: BLE001

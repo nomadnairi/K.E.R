@@ -82,3 +82,38 @@ async def test_match_input_language_clears_forced_language(engine):
     await generate_reply(engine, user_id=9, text="hello in english",
                         locale="ru", match_input_language=True)
     assert "language" not in engine.session(session_id_for(9)).scratch
+
+
+@pytest.mark.asyncio
+async def test_return_metadata_false_keeps_the_plain_string_return(engine):
+    # Default behaviour is unchanged — every existing caller keeps working.
+    reply = await generate_reply(engine, user_id=11, text="hi")
+    assert isinstance(reply, str)
+
+
+@pytest.mark.asyncio
+async def test_return_metadata_true_returns_a_tuple(engine):
+    reply, metadata = await generate_reply(
+        engine, user_id=12, text="hi", return_metadata=True)
+    assert reply == "Certainly, Sir."
+    assert isinstance(metadata, dict)
+
+
+@pytest.mark.asyncio
+async def test_plan_images_defaults_to_allowed(engine):
+    await generate_reply(engine, user_id=13, text="hi")
+    assert engine.session(session_id_for(13)).scratch["plan_images"] is True
+
+
+@pytest.mark.asyncio
+async def test_plan_images_false_is_stashed_on_scratch(engine):
+    await generate_reply(engine, user_id=14, text="hi", plan_images=False)
+    assert engine.session(session_id_for(14)).scratch["plan_images"] is False
+
+
+@pytest.mark.asyncio
+async def test_source_flows_onto_the_request(engine, fake_provider):
+    # source="voice" is what tells the engine to use the fast model / shorter
+    # tool-round budget / concise-reply hint (see test_engine.py for that).
+    await generate_reply(engine, user_id=15, text="hi", source="voice")
+    assert fake_provider.calls  # sanity: the engine actually ran a completion
