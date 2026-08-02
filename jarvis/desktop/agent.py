@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import uuid
 from pathlib import Path
 
@@ -203,6 +204,38 @@ def _build_agent_from_env() -> LocalAgent:
     security = SecurityManager.from_settings(settings, confirmer=TerminalConfirmer())
     controller = DesktopController(security)
     return LocalAgent(server_url, api_key, controller, stable_device_id())
+
+
+class AgentThread:
+    """Runs a :class:`LocalAgent` on its own event loop/thread.
+
+    For embedding in something that already owns an event loop it can't
+    block — a Qt app's GUI thread, in particular — without needing that host
+    to be asyncio-aware at all. Mirrors
+    :class:`jarvis.desktop_app.engine_thread.EngineThread`'s shape.
+    """
+
+    def __init__(self, agent: LocalAgent) -> None:
+        self._agent = agent
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._started = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True,
+                                        name="ker-device-agent")
+
+    def start(self, timeout: float = 5.0) -> None:
+        self._thread.start()
+        self._started.wait(timeout)
+
+    def _run(self) -> None:
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._started.set()
+        self._loop.run_until_complete(self._agent.run())
+
+    def stop(self, timeout: float = 5.0) -> None:
+        if self._loop is not None and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._agent.stop)
+        self._thread.join(timeout)
 
 
 def main() -> None:

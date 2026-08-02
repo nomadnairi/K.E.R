@@ -8,6 +8,7 @@ import pytest
 
 from jarvis.desktop.agent import (
     CAPABILITIES,
+    AgentThread,
     LocalAgent,
     TerminalConfirmer,
     stable_device_id,
@@ -115,3 +116,20 @@ async def test_run_retries_with_backoff_and_stops_cleanly(monkeypatch):
     monkeypatch.setattr(agent, "_session", failing_session)
     await asyncio.wait_for(agent.run(), timeout=2.0)
     assert attempts == 3
+
+
+def test_agent_thread_starts_and_stops_cleanly(monkeypatch):
+    import jarvis.desktop.agent as agent_mod
+    monkeypatch.setattr(agent_mod, "_BACKOFF_INITIAL", 0.01)
+    monkeypatch.setattr(agent_mod, "_BACKOFF_MAX", 0.02)
+
+    agent = LocalAgent("https://x", "k", _controller(), "dev-1")
+
+    async def failing_session():
+        raise ConnectionError("no server in this test")
+
+    monkeypatch.setattr(agent, "_session", failing_session)
+    thread = AgentThread(agent)
+    thread.start()
+    thread.stop(timeout=2.0)
+    assert not thread._thread.is_alive()
