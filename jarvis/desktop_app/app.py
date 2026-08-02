@@ -326,12 +326,18 @@ def run_app() -> int:
             self.setCentralWidget(container)
 
             self.voice_controller = None
+            self.device_agent_thread = None
             self._force_quit = False
             self.tray = None
             self._build_tray()
             if config.mode == "local":
                 self._start_local_engine()
                 self._init_voice()
+            else:
+                # Remote mode: the AI runs on the operator's server, but PC
+                # control ("KER, open YouTube") still has to happen here, on
+                # this machine — see jarvis/desktop/agent.py.
+                self._start_device_agent()
             # Auto-update opt-in: quietly check on launch.
             if getattr(config, "auto_update", False):
                 self._check_updates(explicit=False)
@@ -506,6 +512,49 @@ def run_app() -> int:
             except Exception:  # noqa: BLE001 - deck falls back to demo mode
                 self._local_api = None
 
+        def _start_device_agent(self) -> None:
+            """Remote mode's PC-control channel — connects out to the
+            server's /device/ws so a relayed tool call (open a URL, type,
+            press a key, screenshot) actually runs on this machine. See
+            jarvis/desktop/agent.py for the protocol and why the permission
+            decision is made here, not on the server.
+            """
+            if not config.allow_desktop_control or not config.server_url or not config.auth_token:
+                return
+            from jarvis.config.settings import Settings
+            from jarvis.desktop.agent import AgentThread, LocalAgent, stable_device_id
+            from jarvis.desktop.controller import DesktopController
+            from jarvis.security.manager import SecurityManager
+
+            settings = Settings(
+                allow_desktop_control=config.allow_desktop_control,
+                # "ask" mode has no GUI-safe way to prompt from a background
+                # thread yet — it refuses honestly (SecurityManager's own
+                # message) rather than a half-built dialog. Use "allow" for
+                # now if you want remote-mode PC control; a real confirmation
+                # dialog for this path is a follow-up, not silently skipped.
+                confirm_desktop_control=False,
+                audit_log_path="",
+            )
+            security = SecurityManager.from_settings(settings, confirmer=None)
+            controller = DesktopController(security)
+            agent = LocalAgent(config.server_url, config.auth_token, controller,
+                            stable_device_id())
+            self.device_agent_thread = AgentThread(agent)
+            try:
+                self.device_agent_thread.start()
+            except Exception as exc:  # noqa: BLE001 - PC control just stays offline
+                logger.warning("Device agent failed to start: %s", exc)
+                self.device_agent_thread = None
+
+        def _stop_device_agent(self) -> None:
+            if self.device_agent_thread is not None:
+                try:
+                    self.device_agent_thread.stop()
+                except Exception as exc:  # noqa: BLE001 - shutting down anyway
+                    logger.warning("Device agent stop failed: %s", exc)
+                self.device_agent_thread = None
+
         #: Saving one of these changes what the engine *is*, so it is rebuilt.
         ENGINE_FIELDS = frozenset({
             "assistant_name", "language", "llm_provider", "llm_model",
@@ -544,6 +593,10 @@ def run_app() -> int:
                     logger.warning("Autostart update failed: %s", exc)
             if config.mode == "local" and (changed & self.ENGINE_FIELDS):
                 self._restart_engine()
+            elif config.mode == "remote" and (changed & {"allow_desktop_control",
+                                                        "confirm_desktop_control"}):
+                self._stop_device_agent()
+                self._start_device_agent()
 
         def _restart_engine(self) -> None:
             """Rebuild the engine so new settings are actually in force."""
@@ -1372,6 +1425,7 @@ def run_app() -> int:
                 return
             if self.engine_thread is not None:
                 self.engine_thread.stop()
+            self._stop_device_agent()
             if self.tray is not None:
                 self.tray.hide()
             event.accept()
