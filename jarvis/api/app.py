@@ -81,7 +81,23 @@ def create_app(engine: JarvisEngine | None = None,
         ) from exc
 
     settings = settings or get_settings()
-    engine = engine or JarvisEngine(settings)
+    if engine is None:
+        # The real, standalone API server: it has no desktop of its own, so
+        # its DesktopController must never touch pyautogui/webbrowser
+        # in-process — only relay to a connected device (see
+        # _apply_device_relay / jarvis/desktop/device_registry.py). An
+        # engine passed in explicitly (e.g. the desktop app's own embedded
+        # local-mode engine, jarvis/desktop_app/engine_thread.py) already has
+        # its real controller built and is left untouched here.
+        from jarvis.core.container import ServiceContainer
+        from jarvis.desktop.controller import DesktopController
+        from jarvis.security.manager import SecurityManager
+        from jarvis.security.policy import Capability, CapabilityMode
+        server_desktop_controller = DesktopController(
+            SecurityManager({Capability.DESKTOP_CONTROL: CapabilityMode.OFF}))
+        container = ServiceContainer(settings,
+                                    desktop_controller=server_desktop_controller)
+        engine = JarvisEngine(container=container)
     #: Built on first voice request so the API starts fast without audio deps.
     _voice_svc: object = _UNSET
 
@@ -159,6 +175,21 @@ def create_app(engine: JarvisEngine | None = None,
             scratch["model_profile"] = body.model
         if body.language:
             scratch["language"] = body.language
+
+    def _apply_device_relay(scoped: str, principal: str) -> None:
+        """Stash a device-tool relay onto the session if one is connected.
+
+        Consumed by the desktop-control skills (jarvis/desktop/tools.py) —
+        this engine has no desktop of its own, so a relayed call is the only
+        way "open a URL" etc. does anything meaningful. Absent by default;
+        stashed only for the duration each connected device stays online.
+        """
+        from functools import partial
+        scratch = engine.session(scoped).scratch
+        if engine.container.devices.is_connected(principal):
+            scratch["device_relay"] = partial(engine.container.devices.call, principal)
+        else:
+            scratch.pop("device_relay", None)
 
     async def require_principal(
         authorization: str | None = Header(default=None),
@@ -291,8 +322,10 @@ def create_app(engine: JarvisEngine | None = None,
                 principal: str = Depends(require_principal)) -> ChatOut:
         scoped = _scoped(principal, body.session_id)
         _apply_prefs(scoped, body)
-        reply = await engine.ask(body.message, session_id=scoped)
-        return ChatOut(reply=reply, session_id=body.session_id)
+        _apply_device_relay(scoped, principal)
+        response = await engine.process(
+            Request(text=body.message, session_id=scoped, source="api"))
+        return ChatOut(reply=response.text, session_id=body.session_id)
 
     @app.post("/chat/stream")
     async def chat_stream(body: ChatIn,
@@ -306,10 +339,11 @@ def create_app(engine: JarvisEngine | None = None,
 
         scoped = _scoped(principal, body.session_id)
         _apply_prefs(scoped, body)
+        _apply_device_relay(scoped, principal)
 
         async def _generate():
             async for chunk in engine.stream(
-                Request(text=body.message, session_id=scoped)
+                Request(text=body.message, session_id=scoped, source="api")
             ):
                 yield chunk
 
@@ -323,16 +357,53 @@ def create_app(engine: JarvisEngine | None = None,
             return
         await websocket.accept()
         scoped = _scoped(principal, session_id)
+        _apply_device_relay(scoped, principal)
         try:
             while True:
                 text = await websocket.receive_text()
                 async for chunk in engine.stream(
-                    Request(text=text, session_id=scoped)
+                    Request(text=text, session_id=scoped, source="api")
                 ):
                     await websocket.send_text(chunk)
                 await websocket.send_json({"event": "done"})
         except WebSocketDisconnect:
             return
+
+    @app.websocket("/device/ws")
+    async def device_ws(websocket: WebSocket) -> None:
+        """A connected device (the exe in remote mode, or the standalone
+        ``python -m jarvis.desktop.agent``) — see
+        jarvis/desktop/device_registry.py for the protocol. One socket per
+        principal; the desktop-control tools relay through it via
+        `_apply_device_relay` above.
+        """
+        principal = _principal(websocket.query_params.get("key"))
+        if principal is None:
+            await websocket.close(code=1008)  # policy violation
+            return
+        await websocket.accept()
+        try:
+            hello = await websocket.receive_json()
+        except Exception:  # noqa: BLE001 - a malformed first frame just disconnects
+            await websocket.close(code=1003)
+            return
+        device_id = str(hello.get("device_id") or "device")
+        capabilities = list(hello.get("capabilities") or [])
+        engine.container.devices.register(principal, websocket, device_id,
+                                        capabilities)
+        try:
+            while True:
+                msg = await websocket.receive_json()
+                if msg.get("type") == "tool_result":
+                    engine.container.devices.resolve(
+                        msg.get("call_id", ""),
+                        content=str(msg.get("content", "")),
+                        metadata=msg.get("metadata") or {},
+                    )
+        except WebSocketDisconnect:
+            pass
+        finally:
+            engine.container.devices.unregister(principal)
 
     # -- dashboard (Command Deck web UI) -----------------------------------
 

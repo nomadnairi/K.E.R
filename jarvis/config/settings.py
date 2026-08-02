@@ -187,6 +187,11 @@ class Settings(BaseSettings):
     #: Audit log file for dangerous-capability attempts ("" disables it).
     audit_log_path: str = "logs/audit.log"
 
+    # --- Device relay (server-hosted engine controlling a connected PC) ---
+    #: How long the server waits for a connected device to answer a relayed
+    #: desktop-control call before giving up (e.g. it's asleep/offline).
+    device_relay_timeout_seconds: float = Field(default=30.0, gt=1.0, le=300.0)
+
     # --- Files & coding ---
     #: Expose sandboxed file tools (read on; write gated by security).
     files_enabled: bool = True

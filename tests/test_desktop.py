@@ -55,6 +55,41 @@ async def test_open_url_denied_by_default():
     assert "Cannot open URL" in result.text
 
 
+# -- device relay (server-hosted engine, no desktop of its own) -------------
+
+
+@pytest.mark.asyncio
+async def test_relay_is_used_when_present_in_context():
+    from jarvis.skills.base import SkillResult
+
+    calls = []
+
+    async def fake_relay(tool, arguments):
+        calls.append((tool, arguments))
+        return SkillResult(text="Opened on the customer's PC.")
+
+    # A relay in context means self.controller is never touched — even one
+    # that would otherwise deny the action locally.
+    skill = OpenUrlSkill(DesktopController(_security(False)))
+    result = await skill.execute(url="https://example.com",
+                                context={"device_relay": fake_relay})
+
+    assert calls == [("desktop.open_url", {"url": "https://example.com"})]
+    assert result.text == "Opened on the customer's PC."
+
+
+@pytest.mark.asyncio
+async def test_no_relay_falls_back_to_the_local_controller_unchanged():
+    # context=None or a context without "device_relay" behaves exactly as
+    # before the relay feature existed — this is the local-mode regression
+    # guard (also covered by the un-parametrised tests above).
+    with patch("webbrowser.open", return_value=True) as opener:
+        skill = OpenUrlSkill(DesktopController(_security(True)))
+        result = await skill.execute(url="https://example.com", context={})
+    opener.assert_called_once()
+    assert "Opened" in result.text
+
+
 # -- tool manager -----------------------------------------------------------
 
 
