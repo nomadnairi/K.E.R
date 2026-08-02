@@ -75,3 +75,40 @@ engine without an app restart — only the Deck (QtWebEngine) path does this
 correctly, and every shipped build uses the Deck, so this is dead-code-path
 risk rather than a live bug. Worth a follow-up pass if the Qt fallback is ever
 exercised for real.
+
+## Device relay (03.08.2026) — controlling the customer's PC when the AI runs on the server
+
+Follow-up to the above: the user wants Free/Plus/Pro customers to keep using
+**the operator's own server/API** for the AI brain (billing, no user API key
+needed), but PC-control actions (open a URL, type, press a key, screenshot)
+have to run **on the customer's machine**, not the server. Built a device
+relay — `jarvis/desktop/device_registry.py` (server) +
+`jarvis/desktop/agent.py` (client, embedded in the exe and standalone via
+`python -m jarvis.desktop.agent`) — see that commit's message for the full
+design. Second-opinion review (via ChatGPT, at the user's request) confirmed
+the core architecture (outbound WSS, permission decision stays on the
+controlled machine, no MCP/RDP) and suggested generalizing toward a
+"Device Agent" abstraction (multi-platform, capability negotiation, task
+queue, event bus, offline queueing). Adopted the two cheap parts —
+`(principal, device_id)` keying and a capabilities handshake on connect —
+and explicitly rejected the rest for now:
+
+- **No task queue.** The engine's whole tool-calling loop
+  (`_ask_llm`/`_run_tools`) is synchronous end-to-end already, same as
+  `ConfirmationBroker`'s blocking-with-timeout design; every relayed action
+  here completes in a second or two. A queue would mean rearchitecting that
+  loop for a problem that doesn't exist yet.
+- **No event bus** (device → cloud proactive events like "battery low").
+  Real feature, zero relation to making "open YouTube" work — separate work.
+- **No offline queueing.** A device that's offline gets a clean "PC isn't
+  connected" refusal, not a job that fires whenever it happens to reconnect
+  — queueing physical actions for an unpredictable later moment is a UX risk,
+  not just complexity.
+- **No multi-platform build-out now** — the user already said Raspberry Pi
+  is "for later" at the very start of this project; the same reasoning
+  applies to Android/Linux agents. The key/capability shape leaves room for
+  them without a rewrite when that day comes.
+
+Status: server side + `LocalAgent` class done and tested (private repo).
+Still pending: wiring `LocalAgent` into `jarvis/desktop_app/app.py` for
+remote-mode exe users (public repo) — that's the next commit.
