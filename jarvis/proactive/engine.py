@@ -11,11 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Protocol
 
 from jarvis.core.engine import JarvisEngine
 from jarvis.i18n import language_name
-from jarvis.interfaces.user_prefs import UserPreferences
 from jarvis.config.settings import Settings
 from jarvis.proactive.decision import should_speak
 from jarvis.proactive.models import Signal
@@ -30,15 +29,33 @@ logger = get_logger(__name__)
 SendFn = Callable[[str, str], Awaitable[None]]
 
 
+class ProactivePrefs(Protocol):
+    """The two calls this engine actually needs from a prefs store.
+
+    ``jarvis.interfaces.user_prefs.UserPreferences`` (multi-user, SQLite)
+    satisfies this already; the desktop app's single-user
+    ``LocalProactivePrefs`` (`jarvis/desktop_app/proactive_prefs.py`) is a
+    tiny duck-typed alternative -- neither needs to subclass anything.
+    """
+
+    def list_proactive(self) -> list: ...
+    def get_assistant_name(self, user_id: int | str) -> str | None: ...
+
+
 class ProactiveEngine:
     """Polls sensors for every opted-in user and speaks up when warranted."""
 
-    def __init__(self, engine: JarvisEngine, prefs: UserPreferences,
-                settings: Settings, sensors: list[ProactiveSensor] | None = None) -> None:
+    def __init__(self, engine: JarvisEngine, prefs: ProactivePrefs,
+                settings: Settings, sensors: list[ProactiveSensor] | None = None,
+                session_id_for: Callable[[str], str] = lambda user_id: user_id) -> None:
         self.engine = engine
         self.prefs = prefs
         self.settings = settings
         self.sensors = sensors if sensors is not None else self._default_sensors(settings)
+        #: Maps a prefs row's user_id to the engine session id actually used
+        #: for that channel (e.g. Telegram's "tg-<id>", vs. the desktop app's
+        #: "desktop" session id, which already matches identically).
+        self.session_id_for = session_id_for
         #: user_id -> last-proactive-message timestamp (process-lifetime,
         #: same precedent as _proactive_worker's own nudged/sent_morning dicts).
         self._last_sent: dict[str, float] = {}
@@ -97,6 +114,10 @@ class ProactiveEngine:
                 logger.warning("Proactive send failed for user %s", user_id,
                                 exc_info=True)
                 return
+            # So a later reply that references this has it in context -- a
+            # NOTHING decision never reaches here, so history stays clean.
+            session_id = self.session_id_for(user_id)
+            self.engine.session(session_id).conversation.add_assistant(text)
             self._last_sent[user_id] = now
             sent += 1
 

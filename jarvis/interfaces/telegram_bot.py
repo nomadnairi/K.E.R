@@ -1533,7 +1533,8 @@ async def run(settings: Settings | None = None) -> None:
     # untouched) -- this is KER noticing something (system load, ...) and
     # deciding, via the LLM, whether it's worth mentioning unprompted. It only
     # ever sends a message, never an action.
-    proactive_engine = ProactiveEngine(engine, prefs, settings)
+    proactive_engine = ProactiveEngine(engine, prefs, settings,
+                                    session_id_for=session_id_for)
 
     async def _send_proactive(chat_id: str, text: str) -> None:
         await bot.send_message(int(chat_id), text, parse_mode=None)

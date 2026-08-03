@@ -76,6 +76,24 @@ async def test_a_real_signal_and_decision_sends_a_message(settings):
 
     assert sent == 1
     assert send.sent == [("chat-1", "Sir, heads up.")]
+    # So a later reply referencing it has it in context.
+    assert engine.session("1").conversation.messages[-1].content == "Sir, heads up."
+
+
+@pytest.mark.asyncio
+async def test_uses_a_custom_session_id_mapping(settings):
+    # e.g. Telegram's session_id_for(uid) == f"tg-{uid}", vs. the raw prefs
+    # user_id -- the engine must record history under the REAL session id.
+    settings.proactive_sensors_enabled = True
+    engine = build_engine(settings, FakeProvider(default_reply="Sir, heads up."))
+    prefs = _prefs_with_one_opted_in_user("1")
+    sensor = _StubSensor(Signal(sensor="stub", summary="CPU is high"))
+    pe = ProactiveEngine(engine, prefs, settings, sensors=[sensor],
+                        session_id_for=lambda uid: f"tg-{uid}")
+
+    await pe.tick(_Recorder())
+    assert engine.session("tg-1").conversation.messages[-1].content == "Sir, heads up."
+    assert len(engine.session("1").conversation) == 0
 
 
 @pytest.mark.asyncio
