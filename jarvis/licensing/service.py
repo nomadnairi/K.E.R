@@ -190,6 +190,20 @@ class LicenseService:
             CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
             """
         )
+        # CREATE TABLE IF NOT EXISTS is a no-op against an existing table, so
+        # a database created before telegram_user_id/telegram_verified were
+        # added to this schema never gets them -- every telegram-login path
+        # (redeem_telegram_login, confirm_pairing, get_account_by_telegram)
+        # then fails with "no such column" (surfaces as an HTTP 500).
+        columns = {row["name"] for row in
+                self._conn.execute("PRAGMA table_info(accounts)")}
+        if "telegram_user_id" not in columns:
+            self._conn.execute(
+                "ALTER TABLE accounts ADD COLUMN telegram_user_id INTEGER")
+        if "telegram_verified" not in columns:
+            self._conn.execute(
+                "ALTER TABLE accounts ADD COLUMN telegram_verified "
+                "INTEGER NOT NULL DEFAULT 0")
         self._conn.commit()
 
     def close(self) -> None:

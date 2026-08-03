@@ -162,6 +162,32 @@ def test_telegram_login_bad_code(svc: LicenseService):
     assert svc.redeem_telegram_login("000000") is None
 
 
+def test_migrates_an_accounts_table_predating_telegram_columns(tmp_path):
+    # Simulates a database created before telegram_user_id/telegram_verified
+    # existed in the schema -- CREATE TABLE IF NOT EXISTS is a no-op against
+    # an existing table, so without an explicit ALTER TABLE fallback every
+    # Telegram-login path fails with "no such column" (an HTTP 500 in prod).
+    import sqlite3
+
+    db_path = str(tmp_path / "accounts.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, "
+        "active INTEGER NOT NULL DEFAULT 1, created_at REAL NOT NULL)")
+    conn.commit()
+    conn.close()
+
+    service = LicenseService(db_path, token_ttl_hours=1)
+    try:
+        code = service.create_telegram_login_code(555999)
+        result = service.redeem_telegram_login(code)
+        assert result is not None
+        assert service.get_account_by_telegram(555999) is not None
+    finally:
+        service.close()
+
+
 # -- API keys (the credential behind "API от меня") --------------------------
 
 def test_api_key_is_minted_validated_and_scoped_to_its_account(svc):
