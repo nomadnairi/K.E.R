@@ -54,7 +54,15 @@ _DISPATCH: dict[str, tuple[str, tuple[str, ...]]] = {
     "desktop.screenshot": ("screenshot", ("path",)),
 }
 
-CAPABILITIES = tuple(_DISPATCH.keys())
+#: Tools whose result is image data, not human-readable text — sent back in
+#: the tool_result's "metadata" field instead of "content" (see
+#: ``jarvis/desktop/tools.py``'s ``CaptureScreenSkill``, the local-mode
+#: equivalent of this same dispatch).
+_IMAGE_DISPATCH: dict[str, str] = {
+    "desktop.capture_screen": "capture_png_b64",
+}
+
+CAPABILITIES = tuple(_DISPATCH.keys()) + tuple(_IMAGE_DISPATCH.keys())
 
 
 class TerminalConfirmer:
@@ -117,10 +125,23 @@ class LocalAgent:
 
     async def _handle(self, msg: dict) -> dict:
         tool = msg.get("tool", "")
+        call_id = msg.get("call_id", "")
         arguments = msg.get("arguments") or {}
+
+        image_method_name = _IMAGE_DISPATCH.get(tool)
+        if image_method_name is not None:
+            method = getattr(self.controller, image_method_name)
+            try:
+                b64 = await method()
+                return {"type": "tool_result", "call_id": call_id,
+                        "content": "Captured the screen.",
+                        "metadata": {"image_png_b64": b64}}
+            except JarvisError as exc:
+                return {"type": "tool_result", "call_id": call_id, "content": str(exc)}
+
         spec = _DISPATCH.get(tool)
         if spec is None:
-            return {"type": "tool_result", "call_id": msg.get("call_id", ""),
+            return {"type": "tool_result", "call_id": call_id,
                     "content": f"Unknown tool {tool!r}."}
         method_name, arg_names = spec
         method = getattr(self.controller, method_name)
@@ -128,8 +149,7 @@ class LocalAgent:
             content = await method(*(arguments.get(a, "") for a in arg_names))
         except JarvisError as exc:
             content = str(exc)
-        return {"type": "tool_result", "call_id": msg.get("call_id", ""),
-                "content": content}
+        return {"type": "tool_result", "call_id": call_id, "content": content}
 
     async def _session(self) -> None:
         import websockets

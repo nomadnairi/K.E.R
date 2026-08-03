@@ -24,7 +24,8 @@ def _controller(mode: CapabilityMode = CapabilityMode.ON) -> DesktopController:
 
 def test_capabilities_match_the_dispatch_table():
     assert set(CAPABILITIES) == {"desktop.open_url", "desktop.type",
-                                "desktop.press_key", "desktop.screenshot"}
+                                "desktop.press_key", "desktop.screenshot",
+                                "desktop.capture_screen"}
 
 
 @pytest.mark.asyncio
@@ -45,6 +46,35 @@ async def test_handle_dispatches_open_url(monkeypatch):
     assert calls == ["https://youtube.com"]
     assert reply == {"type": "tool_result", "call_id": "c1",
                     "content": "Opened https://youtube.com."}
+
+
+@pytest.mark.asyncio
+async def test_handle_dispatches_capture_screen_into_metadata(monkeypatch):
+    # Screen-share captures are image data, not human text — they must land
+    # in the tool_result's "metadata", not "content" (see _IMAGE_DISPATCH).
+    controller = _controller()
+
+    async def fake_capture():
+        return "ZmFrZQ=="
+
+    monkeypatch.setattr(controller, "capture_png_b64", fake_capture)
+    agent = LocalAgent("https://x", "k", controller, "dev-1")
+
+    reply = await agent._handle({"call_id": "c9", "tool": "desktop.capture_screen",
+                                "arguments": {}})
+
+    assert reply["call_id"] == "c9"
+    assert reply["metadata"] == {"image_png_b64": "ZmFrZQ=="}
+    assert "content" in reply  # always present, even though it's just a status line
+
+
+@pytest.mark.asyncio
+async def test_handle_capture_screen_denial_has_no_metadata():
+    agent = LocalAgent("https://x", "k", _controller(CapabilityMode.OFF), "dev-1")
+    reply = await agent._handle({"call_id": "c10", "tool": "desktop.capture_screen",
+                                "arguments": {}})
+    assert "metadata" not in reply
+    assert "disabled" in reply["content"].lower()
 
 
 @pytest.mark.asyncio

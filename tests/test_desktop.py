@@ -9,7 +9,12 @@ import pytest
 from jarvis.config.settings import Settings
 from jarvis.core.container import ServiceContainer
 from jarvis.desktop.controller import DesktopController
-from jarvis.desktop.tools import OpenUrlSkill, TypeTextSkill
+from jarvis.desktop.tools import (
+    CaptureScreenSkill,
+    OpenUrlSkill,
+    ShareScreenSkill,
+    TypeTextSkill,
+)
 from jarvis.security.manager import SecurityManager
 from jarvis.skills.manager import ToolManager
 from jarvis.utils.exceptions import PermissionDenied
@@ -88,6 +93,84 @@ async def test_no_relay_falls_back_to_the_local_controller_unchanged():
         result = await skill.execute(url="https://example.com", context={})
     opener.assert_called_once()
     assert "Opened" in result.text
+
+
+# -- screen sharing -----------------------------------------------------------
+
+
+class _FakeImage:
+    def save(self, fp, fmt=None) -> None:
+        fp.write(b"\x89PNG\r\n\x1a\nfakedata")
+
+
+class _FakePyAutoGui:
+    def screenshot(self):
+        return _FakeImage()
+
+
+@pytest.mark.asyncio
+async def test_capture_png_b64_returns_the_captured_bytes():
+    import base64
+
+    controller = DesktopController(_security(True))
+    with patch.object(DesktopController, "_pyautogui", return_value=_FakePyAutoGui()):
+        b64 = await controller.capture_png_b64()
+    assert base64.b64decode(b64) == b"\x89PNG\r\n\x1a\nfakedata"
+
+
+@pytest.mark.asyncio
+async def test_capture_png_b64_denied_by_default():
+    controller = DesktopController(_security(False))
+    with pytest.raises(PermissionDenied):
+        await controller.capture_png_b64()
+
+
+@pytest.mark.asyncio
+async def test_capture_screen_skill_puts_the_image_in_metadata_not_text():
+    skill = CaptureScreenSkill(DesktopController(_security(True)))
+    with patch.object(DesktopController, "_pyautogui", return_value=_FakePyAutoGui()):
+        result = await skill.execute()
+    assert "image_png_b64" in result.metadata
+    assert "image_png_b64" not in result.text
+
+
+@pytest.mark.asyncio
+async def test_capture_screen_skill_surfaces_denial_as_text_not_an_image():
+    skill = CaptureScreenSkill(DesktopController(_security(False)))
+    result = await skill.execute()
+    assert result.metadata == {}
+    assert "Cannot capture screen" in result.text
+
+
+@pytest.mark.asyncio
+async def test_capture_screen_skill_uses_the_relay_when_present():
+    from jarvis.skills.base import SkillResult
+
+    calls = []
+
+    async def fake_relay(tool, arguments):
+        calls.append((tool, arguments))
+        return SkillResult(text="Captured.", metadata={"image_png_b64": "cmVsYXk="})
+
+    skill = CaptureScreenSkill(DesktopController(_security(False)))
+    result = await skill.execute(context={"device_relay": fake_relay})
+
+    assert calls == [("desktop.capture_screen", {})]
+    assert result.metadata["image_png_b64"] == "cmVsYXk="
+
+
+@pytest.mark.asyncio
+async def test_share_screen_skill_toggles_a_session_flag():
+    skill = ShareScreenSkill()
+    scratch: dict = {}
+
+    on = await skill.execute(enabled=True, context=scratch)
+    assert scratch["share_screen"] is True
+    assert "on" in on.text.lower()
+
+    off = await skill.execute(enabled=False, context=scratch)
+    assert scratch["share_screen"] is False
+    assert "off" in off.text.lower()
 
 
 # -- tool manager -----------------------------------------------------------

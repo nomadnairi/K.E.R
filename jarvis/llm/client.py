@@ -308,6 +308,19 @@ class LLMClient:
         provider = self._provider_by_name(result.provider) or self.primary
         return provider.continuation_messages(result, tool_results)
 
+    def provider_for(self, profile: str | None = None,
+                    override: LLMProvider | None = None) -> LLMProvider:
+        """The provider that :meth:`complete` will use, given the same args.
+
+        Mirrors ``complete``'s own precedence (override > profile > primary)
+        so a caller that needs to build a provider-specific message *before*
+        calling ``complete`` — e.g. a vision message for screen sharing — asks
+        the right provider for its wire format.
+        """
+        if override is not None:
+            return override
+        return self._select(profile) or self.primary
+
     def _provider_by_name(self, name: str) -> LLMProvider | None:
         for provider in self._chain():
             if provider.name == name:

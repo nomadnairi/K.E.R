@@ -9,6 +9,8 @@ imports ``pyautogui`` — and the whole thing stays safe by default.
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import webbrowser
 
 from jarvis.security.manager import SecurityManager
@@ -72,6 +74,19 @@ class DesktopController:
         image = await asyncio.to_thread(gui.screenshot)
         await asyncio.to_thread(image.save, path)
         return f"Saved a screenshot to {path}."
+
+    async def capture_png_b64(self) -> str:
+        """Capture the screen in memory and return it as base64-encoded PNG.
+
+        Used for screen-share mode (feeding the model a live look at the
+        screen) — unlike :meth:`screenshot`, nothing is written to disk.
+        """
+        self._require("screen capture (share mode)")
+        gui = self._pyautogui()
+        image = await asyncio.to_thread(gui.screenshot)
+        buf = io.BytesIO()
+        await asyncio.to_thread(image.save, buf, "PNG")
+        return base64.b64encode(buf.getvalue()).decode("ascii")
 
     async def open_url(self, url: str) -> str:
         # Opening a browser is still a real-world action -> gate it.

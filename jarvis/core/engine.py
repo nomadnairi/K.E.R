@@ -343,6 +343,9 @@ class JarvisEngine:
         else:
             model = self.router.model_for(request.text)
         messages = session.conversation.to_provider_format()
+        if session.scratch.get("share_screen"):
+            messages = await self._attach_screen(
+                messages, request.text, session, profile, override)
         total_tokens = 0
         tool_metadata: dict = {}
         result = None
@@ -383,6 +386,30 @@ class JarvisEngine:
             tokens=total_tokens,
             metadata=tool_metadata,
         )
+
+    async def _attach_screen(
+        self, messages: list[dict], text: str, session: SessionContext,
+        profile: str | None, override,
+    ) -> list[dict]:
+        """When screen sharing is on, swap the just-added user turn for a
+        multimodal version carrying a fresh screenshot.
+
+        The persisted ``session.conversation`` stays plain text — this only
+        rebuilds the outgoing copy for this one call, so history never bloats
+        with base64 images. Fails open: any capture problem (no device
+        connected, permission denied, no display) just skips attaching an
+        image rather than breaking the turn.
+        """
+        try:
+            capture = await self.skills.invoke_tool(
+                "desktop.capture_screen", {}, context=session.scratch)
+        except JarvisError:
+            return messages
+        image_b64 = capture.metadata.get("image_png_b64")
+        if not image_b64:
+            return messages
+        provider = self.llm.provider_for(profile, override)
+        return messages[:-1] + [provider.vision_user_message(text, image_b64)]
 
     async def _run_tools(
         self, result, context: dict | None = None

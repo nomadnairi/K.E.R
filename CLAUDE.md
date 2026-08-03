@@ -109,6 +109,59 @@ and explicitly rejected the rest for now:
   applies to Android/Linux agents. The key/capability shape leaves room for
   them without a rewrite when that day comes.
 
-Status: server side + `LocalAgent` class done and tested (private repo).
-Still pending: wiring `LocalAgent` into `jarvis/desktop_app/app.py` for
-remote-mode exe users (public repo) — that's the next commit.
+Status: done on both sides — server + `LocalAgent` (private `server` repo) and
+the exe wiring in `jarvis/desktop_app/app.py`'s remote mode (public `origin`
+repo, `_start_device_agent`/`_stop_device_agent`). Known follow-up: "ask"-mode
+confirmation in remote-mode device control has no GUI dialog yet — the agent
+is built with `confirmer=None` there, so it refuses honestly instead of
+hanging on a half-built dialog. Standalone-agent packaging as an installer is
+also still just `python -m jarvis.desktop.agent`, not a shipped exe.
+
+## Screen sharing (03.08.2026) — the AI can look at the screen, on request
+
+Follow-up to the device relay: the user wants something like a video-call
+screen share — turn it on, and KER can see what's on screen while you talk
+(e.g. "explain this code" while VS Code is open). Chose the practical version
+of this instead of literal video streaming: LLM chat APIs take discrete
+images in messages, not a live video feed, so "share mode" is a per-message
+snapshot, not a frame stream. Confirmed with the user: capture only when they
+actually send a message while sharing is on (not a background timer) — the
+cheaper, "recommended" option from the two offered.
+
+- **`desktop.share_screen`** (`jarvis/desktop/tools.py`) — a real tool the
+  model calls itself (`{"enabled": true/false}`), same "no hardcoded
+  commands" philosophy as everything else here: saying "включи демонстрацию
+  экрана" works because the LLM recognizes the intent and calls the tool, not
+  because of a keyword match. Just flips `session.scratch["share_screen"]`.
+- **`desktop.capture_screen`** — internal only (no `parameters`, so never
+  offered to the model as a callable tool). `jarvis/core/engine.py`'s new
+  `_ask_llm` step, `_attach_screen`, invokes it directly by name once per
+  turn when the flag is on, exactly like `_run_tools` already invokes tools —
+  same relay-or-local branching as every other desktop skill, so it works
+  identically whether the engine is local or server-hosted (relayed to the
+  customer's device). Fails open on any problem (no device connected, denied,
+  no display) — screen sharing just silently doesn't attach an image that
+  turn, never breaks the conversation.
+- **`DesktopController.capture_png_b64`** — captures straight to memory
+  (base64 PNG), no file write, unlike the existing `screenshot()` tool.
+- **Vision wire format**: `LLMProvider.vision_user_message()` (new, default
+  = OpenAI content-parts shape, inherited as-is by OpenRouter/local since
+  they're all OpenAI-compatible); `AnthropicProvider` overrides it for
+  Anthropic's block shape. `LLMClient.provider_for(profile, override)` mirrors
+  `complete()`'s own selection precedence so the engine can ask the *actual*
+  acting provider for its format before the first completion of the turn
+  (same known, accepted limitation as `continuation_messages` already has:
+  if the fallback chain hops to a different provider mid-conversation, a
+  previously-built message may not match that provider's shape — rare, and
+  already true for tool-call continuations, not something this feature needs
+  to solve first).
+- Persisted conversation history (`Conversation`/`Message`) is untouched —
+  still plain text forever; only the one outgoing wire message for a shared
+  turn gets swapped for a multimodal version. Screenshots never bloat stored
+  history.
+
+Not doing in this pass: a bot-menu/UI toggle button (voice/text "turn on
+sharing" already covers the ask); redacting/blurring sensitive screen content
+before sending it to a cloud provider (flagged to the user as a real privacy
+consideration — screen contents leave the machine to whatever LLM API is
+configured — but out of scope for this pass).
