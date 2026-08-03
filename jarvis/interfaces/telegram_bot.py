@@ -33,6 +33,7 @@ from jarvis.i18n import (
     t,
 )
 from jarvis.interfaces.user_prefs import UserPreferences
+from jarvis.proactive.engine import ProactiveEngine
 from jarvis.utils.exceptions import ConfigError, JarvisError
 from jarvis.utils.logger import get_logger, setup_logging
 from jarvis.voice import VoiceService
@@ -1528,6 +1529,16 @@ async def run(settings: Settings | None = None) -> None:
     await _set_commands()
     await _startup_report()
     worker_task = asyncio.create_task(_proactive_worker())
+    # Separate from _proactive_worker above (reminders/automations/idle-nudge,
+    # untouched) -- this is KER noticing something (system load, ...) and
+    # deciding, via the LLM, whether it's worth mentioning unprompted. It only
+    # ever sends a message, never an action.
+    proactive_engine = ProactiveEngine(engine, prefs, settings)
+
+    async def _send_proactive(chat_id: str, text: str) -> None:
+        await bot.send_message(int(chat_id), text, parse_mode=None)
+
+    proactive_task = asyncio.create_task(proactive_engine.run(_send_proactive))
     logger.info("Telegram bot starting (long-polling)…")
     try:
         # Keep the sales bot up 24/7: if polling dies (network drop, Telegram
@@ -1551,10 +1562,12 @@ async def run(settings: Settings | None = None) -> None:
                 break
     finally:
         worker_task.cancel()
-        try:
-            await worker_task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
+        proactive_task.cancel()
+        for task in (worker_task, proactive_task):
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
         await engine.shutdown()
         if license_service is not None:
             license_service.close()

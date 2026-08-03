@@ -365,6 +365,26 @@ class Settings(BaseSettings):
     #: Nudge users who've been quiet for at least this many days (0 disables).
     proactive_idle_days: int = Field(default=3, ge=0)
 
+    # --- Proactive sensors (the bot notices things and speaks up) ---
+    # Separate from the reminders/automations/idle-nudge block above, which is
+    # untouched by this: this is KER *noticing* something (system load, a
+    # smart-home state change, ...) and deciding, via the LLM, whether it's
+    # worth mentioning unprompted. It only ever sends a message -- never
+    # executes an action on its own.
+    #: Master switch for the sensor-based proactive engine.
+    proactive_sensors_enabled: bool = False
+    #: Seconds between sensor-check ticks.
+    proactive_sensor_interval_seconds: int = Field(default=120, ge=30)
+    #: Per-user minimum gap between two sensor-triggered messages.
+    proactive_cooldown_seconds: int = Field(default=1800, ge=60)
+    #: Bound on concurrent per-tick sensor I/O (screenshots/HTTP polls/etc).
+    proactive_max_concurrent: int = Field(default=5, ge=1)
+    proactive_system_health_enabled: bool = True
+    #: System-health sensor thresholds -- a cheap pre-filter, not the send
+    #: decision itself (the LLM still decides whether crossing this matters).
+    proactive_cpu_threshold_pct: int = Field(default=90, ge=1, le=100)
+    proactive_mem_threshold_pct: int = Field(default=90, ge=1, le=100)
+
     # --- Telegram bot ---
     telegram_bot_token: str = Field(default="", description="Bot token from @BotFather.")
     #: Optional comma-separated allowlist of Telegram user IDs (empty = open).

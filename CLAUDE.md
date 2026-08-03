@@ -165,3 +165,78 @@ sharing" already covers the ask); redacting/blurring sensitive screen content
 before sending it to a cloud provider (flagged to the user as a real privacy
 consideration — screen contents leave the machine to whatever LLM API is
 configured — but out of scope for this pass).
+
+## Speed (03.08.2026) — voice replies were silently stuck on the slow default
+
+User reported both voice and text replies taking 10-20s, "обязательно,
+очень обязательно" to fix. Root cause for voice specifically: the "voice
+prefers a fast model" logic (`JarvisEngine._ask_llm`) only activated if the
+operator had already set `LLM_MODEL_FAST` — nobody had, so voice silently ran
+on the same model as everything else. Fixed with a per-provider fast-model
+fallback table (`DEFAULT_FAST_MODELS` in `jarvis/config/constants.py` —
+Anthropic → Haiku, OpenAI → gpt-4o-mini) used when `llm_model_fast` is unset;
+an explicit `LLM_MODEL_FAST` still wins. Text replies have the equivalent
+lever (`AI_ROUTER_ENABLED` + `LLM_MODEL_FAST`/`LLM_MODEL_STRONG`) but it's an
+operator `.env` setting on the VPS, not something fixable from here — told
+the user what to set.
+
+## Proactive engine (03.08.2026) — KER speaks up first, "real movie Jarvis"
+
+User wants ambient/background behavior: KER notices things (system load,
+screen, smart home, "anything not even on this list") and messages the user
+*unprompted*, not just replies. Explicitly separate from and does **not**
+include autonomous action-taking ("сам исправляет") — user asked to discuss
+that boundary in a later, separate conversation. This feature only ever
+sends a message; it never executes a tool unprompted, no change to
+`SecurityManager` gating.
+
+Researched first (two Explore passes) rather than assumed: the *only* real
+background-initiated push channel anywhere in the codebase is
+`jarvis/interfaces/telegram_bot.py`'s `_proactive_worker()` (reminders/
+automations/morning-greeting/idle-nudge, gated by the existing
+`prefs.list_proactive()` opt-in). `/ws/{session_id}` has no connection
+registry (can't push into an open chat socket from outside); desktop app has
+working push-to-UI primitives (`_notify()` tray toast, JS `toast()`) but
+nothing triggers them from a backend event yet; Android has no push infra at
+all. **v1 ships Telegram-only** — the other channels are real, understood
+fast-follows, not attempted here.
+
+Built `jarvis/proactive/` (mirrors `jarvis/goals/`'s shape): `Signal`
+(a plain fact record — `sensor`/`summary`/`detail`/`severity`, `severity`
+is metadata for the prompt only, never branched on in code — that would just
+be a hardcoded trigger table under a different name), `ProactiveSensor` ABC
+(the one extension point — "anything not on the list" is a new small class,
+nothing else changes), `SystemHealthSensor` (psutil CPU/RAM, fires only on
+sustained breach across `consecutive_ticks`, not a single noisy sample),
+`decision.should_speak()` (one plain LLM call via the *existing*
+`PromptBuilder.system_prompt(extra_context=...)`, fast model by the same
+precedence voice already uses, a `NOTHING` sentinel instead of parsing an
+empty string, zero-signal ticks never reach the LLM at all), and
+`ProactiveEngine` (per-user loop: cooldown gate before sensors even run,
+`asyncio.gather` + a semaphore bound on concurrent per-tick I/O, wired into
+`telegram_bot.py`'s startup as a *second*, separate task next to
+`_proactive_worker` — deliberately not merged into it, so reminders/
+automations (already working, already tested) are completely untouched).
+
+Deliberately deferred/stubbed for a later pass (from the Plan agent's
+review, confirmed by reading the actual code, not assumed):
+- **Schedule is not migrated into `jarvis/proactive/`.** Reminders are
+  user-authored text with deterministic delivery; routing them through an
+  LLM-decides pipeline would let the model paraphrase text the user typed
+  themselves, for zero benefit. `_proactive_worker` keeps doing this exactly
+  as before.
+- **`IntegrationsSensor`/`ScreenSensor` are not built yet** (rollout order:
+  system-health first as a fully self-contained, reviewable slice; then
+  integrations via an additive `BaseIntegration.snapshot()`; screen last).
+  The screen sensor specifically has a real wiring gap: `desktop.
+  capture_screen`'s relay only fires when `session.scratch["device_relay"]`
+  is set, which today only ever happens on the API/license-account path
+  (`_apply_device_relay` in `jarvis/api/app.py`) — `telegram_bot.py` never
+  sets it, so a naive proactive screen sensor for Telegram users would
+  silently capture *the bot server's own screen* in a multi-tenant
+  deployment. Needs a Telegram-user → license-account → `DeviceRegistry`
+  principal mapping before it can default on; ship it off by default with
+  this documented, not silently wrong.
+- `/ws/{session_id}` connection registry, desktop app `_notify()`/toast
+  trigger wiring, Android push (FCM, from scratch) — real fast-follows once
+  the Telegram-only v1 is proven, not blockers for it.
