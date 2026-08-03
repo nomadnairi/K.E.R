@@ -127,6 +127,32 @@ async def test_voice_source_prefers_the_fast_model(settings):
 
 
 @pytest.mark.asyncio
+async def test_voice_falls_back_to_a_known_fast_default_when_unset(settings):
+    # settings.llm_model_fast is "" (nothing configured) -- voice must still
+    # get a fast model via the per-provider default, not silently stay on
+    # the slow default just because the operator never set LLM_MODEL_FAST.
+    assert settings.llm_model_fast == ""
+    assert settings.llm_provider == "anthropic"
+    provider = FakeProvider(default_reply="ok")
+    engine = build_engine(settings, provider)
+
+    await engine.process(Request(text="hi", source="voice"))
+    assert provider.models[-1] == "claude-3-5-haiku-20241022"
+
+
+@pytest.mark.asyncio
+async def test_voice_fast_default_is_a_noop_for_an_unknown_provider(settings):
+    settings.llm_provider = "openrouter"
+    settings.openrouter_api_key = "test-key"
+    provider = FakeProvider(default_reply="ok")
+    provider.name = "openrouter"
+    engine = build_engine(settings, provider)
+
+    await engine.process(Request(text="hi", source="voice"))
+    assert provider.models[-1] is None
+
+
+@pytest.mark.asyncio
 async def test_tool_metadata_reaches_the_final_response(settings):
     from jarvis.skills.base import BaseSkill, SkillResult
     from jarvis.skills.registry import SkillRegistry

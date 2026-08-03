@@ -19,7 +19,12 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterator
 
-from jarvis.config.constants import AssistantState, EventType, ResponseType
+from jarvis.config.constants import (
+    DEFAULT_FAST_MODELS,
+    AssistantState,
+    EventType,
+    ResponseType,
+)
 from jarvis.config.settings import Settings
 from jarvis.core.container import ServiceContainer
 from jarvis.core.context import SessionContext
@@ -332,14 +337,18 @@ class JarvisEngine:
         model_id, profile = self._model_selection(session)
         override = self._byok_provider(session)
         # A specific catalog model wins everywhere (incl. on a BYOK key); a
-        # voice turn prefers the fast tier next (kept snappy for speech);
-        # otherwise BYOK uses its own default and the router picks a tier.
+        # voice turn prefers the fast tier next (kept snappy for speech) —
+        # an explicit LLM_MODEL_FAST wins, but a known per-provider fast
+        # default kicks in even if the operator never set one, so voice is
+        # never silently stuck on the slow default; otherwise BYOK uses its
+        # own default and the router picks a tier.
         if model_id:
             model = model_id
         elif override:
             model = None
-        elif is_voice and self.settings.llm_model_fast:
-            model = self.settings.llm_model_fast
+        elif is_voice:
+            model = (self.settings.llm_model_fast
+                    or DEFAULT_FAST_MODELS.get(self.settings.llm_provider))
         else:
             model = self.router.model_for(request.text)
         messages = session.conversation.to_provider_format()
