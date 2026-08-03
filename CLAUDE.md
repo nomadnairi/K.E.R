@@ -240,3 +240,33 @@ review, confirmed by reading the actual code, not assumed):
 - `/ws/{session_id}` connection registry, desktop app `_notify()`/toast
   trigger wiring, Android push (FCM, from scratch) — real fast-follows once
   the Telegram-only v1 is proven, not blockers for it.
+
+**Correction, same day**: the user's primary product is the exe, not the
+Telegram bot — v1 shipping Telegram-only wasn't communicated clearly enough
+up front. Second slice added the exact same `ProactiveEngine` as a delivery
+channel inside the desktop app, **local mode only**: `EngineThread.submit()`
+runs it on the engine's own loop (same pattern `start_api()` already uses
+for uvicorn), a new `ReplyBridge.proactive` Qt signal hops it back to the
+GUI thread (same cross-thread pattern every other engine-thread callback in
+`app.py` already uses), and `LocalProactivePrefs`
+(`jarvis/desktop_app/proactive_prefs.py`) is a tiny duck-typed stand-in for
+`UserPreferences` — local mode is one user, not a SQLite table of chat ids.
+Off by default (`AppConfig.proactive_enabled`); toggling it starts/stops the
+task without a full engine restart. Also fixed a real bug found while
+building this: a sent proactive message was never appended to
+`session.conversation` (so a reply referencing it had no context), and
+`ProactiveEngine` assumed a prefs row's `user_id` IS the engine session id,
+which is wrong for Telegram (`session_id_for(uid) == "tg-<uid>"`) — added an
+injectable `session_id_for` mapping, defaulting to identity (correct for the
+desktop app's single "desktop" session).
+
+Remote mode is still untouched — same reason as before, no push-capable
+transport exists for it yet (`/ws/{session_id}` still has no connection
+registry). **Repo routing note**: this slice's `jarvis/desktop_app/*` files
+went to the public `origin` repo (exe-specific, per the routing rule); the
+shared `jarvis/proactive/engine.py` fix + the Telegram `session_id_for` wiring
+went to `server`. Cherry-picking the exe commit onto origin's tip conflicted
+in one spot (`on_settings_changed`'s `elif` chain, since origin already has
+the earlier device-relay feature's own `elif` branch there that `server`'s
+branch doesn't) — resolved by keeping both branches side by side; worth
+knowing if this happens again on the next exe-only cherry-pick.
