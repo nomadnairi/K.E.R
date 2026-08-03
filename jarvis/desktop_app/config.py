@@ -45,6 +45,9 @@ class AppConfig:
     start_on_boot: bool = False
     #: Show a desktop notification when a reply arrives while hidden.
     notifications: bool = True
+    #: Local mode only: let KER notice things (system load, ...) and speak up
+    #: unprompted, not just reply. Off by default -- an explicit opt-in.
+    proactive_enabled: bool = False
     #: Set once the first-run onboarding has been shown.
     onboarded: bool = False
     #: Check GitHub for updates on launch and open the download automatically.
@@ -227,6 +230,7 @@ class AppConfig:
             "tts_voice": self.tts_voice,
             "local_whisper_model": self.local_whisper_model,
             "voice_replies": self.voice_replies,
+            "proactive_sensors_enabled": self.proactive_enabled,
         }
         if self.assistant_name:
             overrides["assistant_name"] = self.assistant_name

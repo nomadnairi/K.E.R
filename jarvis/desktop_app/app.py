@@ -159,6 +159,7 @@ def run_app() -> int:
         chunk = Signal(str)      # one streamed piece of the reply
         voice = Signal(str, str, str, str)  # transcript, reply, audio_path, error
         update_ready = Signal(bool, str, str, bool)  # available, latest, url, explicit
+        proactive = Signal(str)  # a message KER sent unprompted (local mode only)
 
     # -- login dialog ---------------------------------------------------------
 
@@ -273,7 +274,9 @@ def run_app() -> int:
             self.bridge.done.connect(self._on_reply)
             self.bridge.chunk.connect(self._on_chunk)
             self.bridge.update_ready.connect(self._on_update)
+            self.bridge.proactive.connect(self._on_proactive)
             self._streaming = False
+            self._proactive_future = None
             loc = config.language
 
             self.setWindowTitle(tr("app_title", loc))
@@ -505,6 +508,37 @@ def run_app() -> int:
                 self._local_api = self.engine_thread.start_api()
             except Exception:  # noqa: BLE001 - deck falls back to demo mode
                 self._local_api = None
+            self._start_proactive()
+
+        def _start_proactive(self) -> None:
+            """Local mode only: let KER notice things and speak up unprompted.
+
+            Runs on the same engine loop EngineThread already owns
+            (`EngineThread.submit`, the exact pattern `start_api()` uses for
+            uvicorn) -- no new thread. Delivery hops back to the GUI thread
+            via `self.bridge.proactive`, the same cross-thread pattern every
+            other engine-thread callback here already uses.
+            """
+            if (config.mode != "local" or not config.proactive_enabled
+                    or self.engine_thread is None):
+                return
+            from jarvis.proactive.engine import ProactiveEngine
+            from jarvis.desktop_app.proactive_prefs import LocalProactivePrefs
+
+            prefs = LocalProactivePrefs(config)
+            proactive_engine = ProactiveEngine(
+                self.engine_thread.engine, prefs, self.engine_thread.engine.settings)
+
+            async def _send(chat_id: str, text: str) -> None:
+                self.bridge.proactive.emit(text)
+
+            self._proactive_future = self.engine_thread.submit(
+                proactive_engine.run(_send))
+
+        def _stop_proactive(self) -> None:
+            if self._proactive_future is not None:
+                self._proactive_future.cancel()
+                self._proactive_future = None
 
         #: Saving one of these changes what the engine *is*, so it is rebuilt.
         ENGINE_FIELDS = frozenset({
@@ -544,9 +578,14 @@ def run_app() -> int:
                     logger.warning("Autostart update failed: %s", exc)
             if config.mode == "local" and (changed & self.ENGINE_FIELDS):
                 self._restart_engine()
+            elif config.mode == "local" and "proactive_enabled" in changed:
+                # A lightweight on/off -- doesn't need a full engine rebuild.
+                self._stop_proactive()
+                self._start_proactive()
 
         def _restart_engine(self) -> None:
             """Rebuild the engine so new settings are actually in force."""
+            self._stop_proactive()
             old = self.engine_thread
             self.engine_thread = None
             self.voice_controller = None
@@ -875,6 +914,18 @@ def run_app() -> int:
             if not error:
                 last = self._messages[-1][1] if self._messages else ""
                 self._notify(reply or last)
+
+        def _on_proactive(self, text: str) -> None:
+            """A message KER sent unprompted (local mode's ProactiveEngine).
+
+            Runs on the GUI thread (Qt marshals the cross-thread emit safely,
+            same as every other bridge signal here) -- shows up like an
+            ordinary reply, not just a toast, since the user never asked for
+            it and might otherwise miss a transient notification entirely.
+            """
+            self._messages.append(("assistant", text))
+            self._render_chat()
+            self._notify(text)
 
         # -- voice tab -----------------------------------------------------
 
@@ -1370,6 +1421,7 @@ def run_app() -> int:
                 self.tray.showMessage(
                     "KER", tr("tray_running", config.language))
                 return
+            self._stop_proactive()
             if self.engine_thread is not None:
                 self.engine_thread.stop()
             if self.tray is not None:
