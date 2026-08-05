@@ -1,0 +1,16 @@
+{
+  "name": "ker-web",
+  "private": true,
+  "description": "K.E.R. web surfaces: the public site and the dashboard, sharing one design system.",
+  "workspaces": [
+    "packages/*",
+    "site",
+    "dashboard"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=site",
+    "build": "npm run build --workspace=site",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
