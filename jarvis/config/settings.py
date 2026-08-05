@@ -289,6 +289,16 @@ class Settings(BaseSettings):
     #: Require a linked+verified Telegram account before login succeeds.
     auth_require_telegram: bool = False
 
+    # --- Web dashboard session (browser client) ---
+    # The dashboard signs in with the same Telegram code as the desktop app but
+    # gets an independent session, carried in an httpOnly cookie rather than
+    # localStorage (a token JavaScript can read is stolen by the first XSS).
+    #: Cookie domain. Set to ".ker-ai.online" so one session covers the site
+    #: and the dashboard subdomain; empty = host-only (fine for localhost).
+    session_cookie_domain: str = ""
+    #: Send the cookie over HTTPS only. Turn off ONLY for local development.
+    session_cookie_secure: bool = True
+
     # --- Billing (payments → automatic license issuance) ---
     #: Enable the /buy flow in the bot and the /billing/webhook endpoint.
     billing_enabled: bool = False
