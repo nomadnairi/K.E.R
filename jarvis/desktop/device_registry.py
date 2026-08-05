@@ -65,6 +65,22 @@ class DeviceRegistry:
     def is_connected(self, principal: str) -> bool:
         return principal in self._connections
 
+    def describe(self, principal: str) -> list[dict]:
+        """The devices this principal has online, for the dashboard to list.
+
+        Returns a list even though one principal currently has at most one
+        connection — the map is keyed for more, and a caller written against a
+        list today needs no change when that day comes.
+        """
+        conn = self._connections.get(principal)
+        if conn is None:
+            return []
+        return [{
+            "device_id": conn.device_id,
+            "capabilities": list(conn.capabilities),
+            "online": True,
+        }]
+
     # -- relaying tool calls ---------------------------------------------------
 
     async def call(self, principal: str, tool: str, arguments: dict,
