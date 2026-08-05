@@ -182,6 +182,6 @@ export function DocsPage() {
           </article>
         </div>
       </Container>
-    </>
+    </div>
   );
 }
