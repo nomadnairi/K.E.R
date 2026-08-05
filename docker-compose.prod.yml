@@ -6,11 +6,13 @@
 #
 # Usage:
 #   cp .env.example .env               # fill in DOMAIN, LETSENCRYPT_EMAIL, etc.
+#   make web-build                     # the two static roots must exist first
 #   deploy/nginx/init-letsencrypt.sh   # ONE-TIME, once DNS points here
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# See docs/INFRASTRUCTURE.md for the full runbook (domain/DNS setup, network
-# diagram, renewal verification, backups, maintenance).
+# See docs/DEPLOY_SITE.md for the step-by-step runbook and
+# docs/INFRASTRUCTURE.md for the wider picture (network diagram, renewal
+# verification, backups, maintenance).
 #
 # `docker compose -f docker-compose.yml up -d` (no overlay) keeps working
 # exactly as before — this file is purely additive.
@@ -62,6 +64,13 @@ services:
       - ker_certbot_etc:/etc/letsencrypt:ro
       - ker_certbot_webroot:/var/www/certbot:ro
       - ./logs/nginx:/var/log/nginx
+      # Built static front-ends. Plain bind mounts of the Vite output — no
+      # extra container, no build step inside the image: `make web-build`
+      # produces these on the host and nginx just serves them. Run it BEFORE
+      # `up -d`: if the directories are missing, Docker creates them empty and
+      # root-owned, and both hostnames answer 403.
+      - ./web/site/dist:/var/www/site:ro
+      - ./web/dashboard/dist:/var/www/dashboard:ro
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s

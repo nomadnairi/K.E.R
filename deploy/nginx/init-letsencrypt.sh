@@ -3,10 +3,10 @@
 #
 # Run this ONCE, on the VPS, from the repo root, after DOMAIN and
 # LETSENCRYPT_EMAIL are set in .env and the domain's DNS A record already
-# points at this server (see docs/INFRASTRUCTURE.md — "Настройка домена" /
-# "Настройка DNS"). Everything after this is fully automatic (the `certbot`
-# container renews on its own; Nginx reloads itself periodically to pick up
-# the renewed cert — see docs/INFRASTRUCTURE.md — "Автоматическое продление").
+# points at this server (see docs/DEPLOY_SITE.md — step 1). Everything after
+# this is fully automatic (the `certbot` container renews on its own; Nginx
+# reloads itself periodically to pick up the renewed cert — see
+# docs/INFRASTRUCTURE.md — "Автоматическое продление").
 #
 # Safe to re-run: it skips steps that already completed.
 set -euo pipefail
@@ -69,8 +69,13 @@ echo "== 4/5 Deleting the temporary certificate and requesting the real one from
 docker run --rm -v ker_certbot_etc:/etc/letsencrypt alpine \
     rm -rf "/etc/letsencrypt/live/$DOMAIN" "/etc/letsencrypt/archive/$DOMAIN" "/etc/letsencrypt/renewal/$DOMAIN.conf"
 
+# One certificate covering every name Nginx serves: the apex, www, and the
+# dashboard subdomain. All three must already resolve to this server — if one
+# does not, its ACME challenge fails and the whole request is refused. See the
+# DNS step in docs/DEPLOY_SITE.md.
 $COMPOSE run --rm --entrypoint certbot certbot certonly --webroot -w /var/www/certbot \
-        --email "$LETSENCRYPT_EMAIL" -d "$DOMAIN" \
+        --email "$LETSENCRYPT_EMAIL" \
+        -d "$DOMAIN" -d "www.$DOMAIN" -d "dashboard.$DOMAIN" \
         --rsa-key-size 4096 --agree-tos --no-eff-email $STAGING_ARG
 
 echo "== 5/5 Reloading Nginx with the real certificate..."
