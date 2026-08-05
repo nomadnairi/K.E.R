@@ -56,8 +56,8 @@ export const DOCS: readonly DocSection[] = [
           },
           {
             kind: 'note',
-            ru: 'Один аккаунт — все клиенты. Память, агенты и настройки общие для Telegram, Desktop и Web.',
-            en: 'One account, every client. Memory, agents and settings are shared across Telegram, Desktop and Web.',
+            ru: 'Один аккаунт — все клиенты. Тариф, лимиты и настройки общие для Telegram, Desktop и Web. История переписки пока своя в каждом клиенте.',
+            en: 'One account, every client. Plan, limits and settings are shared across Telegram, Desktop and Web. Conversation history is still per-client for now.',
           },
         ],
       },

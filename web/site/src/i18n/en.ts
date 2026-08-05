@@ -44,7 +44,7 @@ export const en: Dictionary = {
 
   ecosystem: {
     title: 'One core. Any client.',
-    subtitle: 'One account, one memory, one set of agents.',
+    subtitle: 'One account, one plan, one set of settings.',
     core: 'AI CORE',
     coreCaption: 'memory · agents · tools',
     clients: {
@@ -243,8 +243,9 @@ export const en: Dictionary = {
       },
       {
         q: 'Does one account work across all clients?',
-        a: 'Yes. Telegram, Desktop and Web are entrances to one core with ' +
-          'shared memory and shared settings.',
+        a: 'Yes. Telegram, Desktop and Web are entrances to one core: one ' +
+          'account, one plan, one set of settings. Conversation history is ' +
+          'still per-client for now.',
       },
       {
         q: 'Can I self-host it?',
