@@ -1,133 +1,136 @@
-# Deploying J.A.R.V.I.S. on a VPS
+# Развёртывание KER на VPS
 
-This guide covers two ways to run J.A.R.V.I.S. on a server: **Docker** (recommended)
-and a **systemd** service. Both run the same two processes:
+Здесь описаны два способа запустить KER на сервере: **Docker** (рекомендуется)
+и служба **systemd**. Оба поднимают одни и те же два процесса:
 
-- **API** — the HTTP/WebSocket server (`python -m jarvis.api`), for desktop/mobile
-  clients and scripts.
-- **Bot** — the Telegram interface (`python -m jarvis.interfaces.telegram_bot`),
-  which uses long-polling and needs **no open inbound port**.
+- **API** — HTTP/WebSocket-сервер (`python -m jarvis.api`), к нему ходят
+  desktop- и мобильные клиенты и скрипты.
+- **Бот** — интерфейс Telegram (`python -m jarvis.interfaces.telegram_bot`).
+  Работает через long-polling, **открытый входящий порт не нужен**.
 
-They share the same `data/` (SQLite memory) and `logs/` (audit log) directories,
-so the assistant remembers you no matter which surface you use.
+У них общие каталоги `data/` (память в SQLite) и `logs/` (журнал аудита),
+поэтому ассистент помнит вас independently от того, откуда вы пришли.
 
 ---
 
-## 1. Prerequisites
+## 1. Что нужно заранее
 
-- A Linux VPS (Ubuntu 22.04+ / Debian 12+ recommended), 1 vCPU / 1 GB RAM is enough.
-- An LLM key: `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`).
-- Optional: a Telegram bot token from [@BotFather](https://t.me/BotFather).
+- Linux-VPS (лучше Ubuntu 22.04+ или Debian 12+). Хватит 1 vCPU и 1 ГБ RAM.
+- Ключ к языковой модели: `ANTHROPIC_API_KEY` (или `OPENAI_API_KEY`).
+- По желанию — токен Telegram-бота от [@BotFather](https://t.me/BotFather).
 
-### Security first
+### Сначала — безопасность
 
-- **Set `API_KEY`.** With an empty key the API is *open*. Generate a strong one:
+- **Задайте `API_KEY`.** С пустым ключом API *открыт всем*. Сгенерируйте
+  стойкий:
   ```bash
   python -c "import secrets; print(secrets.token_urlsafe(32))"
   ```
-- **Never commit `.env`.** It stays on the server only. The repo ships only
-  `.env.example`.
-- Keep dangerous capabilities off on a server (`ALLOW_SHELL`, `ALLOW_FILE_WRITE`,
-  `ALLOW_DESKTOP_CONTROL` = `false`) unless you specifically need them.
+- **Никогда не коммитьте `.env`.** Он живёт только на сервере. В репозитории
+  лежит лишь `.env.example`.
+- Опасные возможности на сервере держите выключенными (`ALLOW_SHELL`,
+  `ALLOW_FILE_WRITE`, `ALLOW_DESKTOP_CONTROL` = `false`), если они вам
+  действительно не нужны.
 
 ---
 
-## 2. Docker (recommended)
+## 2. Docker (рекомендуется)
 
-Install Docker + the Compose plugin, then:
+Поставьте Docker и плагин Compose, затем:
 
 ```bash
 git clone https://github.com/nomadnairi/J.A.R.V.I.S.git jarvis
 cd jarvis
 
 cp .env.example .env
-nano .env            # fill ANTHROPIC_API_KEY, API_KEY, and (optional) TELEGRAM_BOT_TOKEN
+nano .env            # впишите ANTHROPIC_API_KEY, API_KEY и (по желанию) TELEGRAM_BOT_TOKEN
 
 docker compose up -d --build
 ```
 
-Check it:
+Проверка:
 
 ```bash
 docker compose ps
 curl -fsS http://localhost:8000/health | python -m json.tool
-docker compose logs -f            # follow logs (Ctrl-C to stop following)
+docker compose logs -f            # следить за логами (Ctrl-C — перестать следить)
 ```
 
-Update to a new version:
+Обновление до новой версии:
 
 ```bash
 git pull
 docker compose up -d --build
 ```
 
-> **Changes not showing up?** A stale image or a container that was never
-> recreated is the usual cause. Use the bulletproof redeploy script — it pulls,
-> rebuilds with **no cache**, force-recreates the containers, and prints the
-> bot's startup report (version + whether the subscription gate is ON):
+> **Изменения не появляются?** Обычная причина — устаревший образ или
+> контейнер, который так и не пересоздали. Возьмите надёжный скрипт
+> передеплоя: он делает pull, пересобирает **без кеша**, принудительно
+> пересоздаёт контейнеры и печатает стартовый отчёт бота (версия и включён ли
+> гейт подписки):
 >
 > ```bash
 > bash deploy/redeploy.sh
 > ```
 >
-> On startup the bot logs a line beginning `SUBSCRIPTION GATE:` — `ON` with the
-> channel name if `TELEGRAM_REQUIRED_CHANNEL` is set and the bot is a channel
-> admin, or `OFF` if the gate isn't configured. If it says OFF, the gate simply
-> isn't enabled in the environment that's running — no code change turns it on
-> until that variable is set.
+> При старте бот пишет строку, начинающуюся с `SUBSCRIPTION GATE:` — `ON` и
+> имя канала, если `TELEGRAM_REQUIRED_CHANNEL` задан и бот админ канала, либо
+> `OFF`, если гейт не настроен. Если написано OFF — значит, в запущенном
+> окружении он просто не включён; никакая правка кода его не включит, пока не
+> выставлена эта переменная.
 
-Stop / remove:
+Остановить / удалить:
 
 ```bash
-docker compose down               # keeps the named volumes (your data)
-docker compose down -v            # also deletes data + logs volumes
+docker compose down               # именованные тома (ваши данные) остаются
+docker compose down -v            # заодно удаляет тома data и logs
 ```
 
-> **Only want the API** (no Telegram bot)? Leave `TELEGRAM_BOT_TOKEN` empty and
-> run just that service: `docker compose up -d --build api`.
+> **Нужен только API** (без Telegram-бота)? Оставьте `TELEGRAM_BOT_TOKEN`
+> пустым и запустите один сервис: `docker compose up -d --build api`.
 
-### Two bots: public (sales) + personal (yours)
+### Два бота: публичный (продажи) и личный (ваш)
 
-The same image runs as many bots as you like — you just give each a different
-token and env file. A common setup is **two**:
+Один и тот же образ поднимает сколько угодно ботов — достаточно дать каждому
+свой токен и свой env-файл. Типовая схема — **два**:
 
-- **Public bot** — your sales/user bot (the default `bot` service): subscription
-  gate on, `/buy` enabled, customers use it, and you manage them via the admin
-  panel. Configured in `.env`.
-- **Personal bot** — your own private J.A.R.V.I.S. with a **separate token** and
-  its own memory: no gate, no sales, just you.
+- **Публичный бот** — продающий, для пользователей (сервис `bot` по
+  умолчанию): гейт подписки включён, `/buy` работает, клиенты пользуются, вы
+  управляете ими через админ-панель. Настраивается в `.env`.
+- **Личный бот** — ваш приватный KER с **отдельным токеном** и собственной
+  памятью: без гейта, без продаж, только вы.
 
 ```bash
-cp .env.personal.example .env.personal   # second @BotFather token, your id
+cp .env.personal.example .env.personal   # второй токен от @BotFather, ваш id
 docker compose --profile personal up -d bot-personal
 ```
 
-Both are the same code, isolated by token and by data volume — the public bot's
-customers and your personal chats never mix. Anyone who clones the repo only
-gets the **code**: your tokens, database and admin id live in your `.env` files
-(never committed), so they can only run their own empty instance, never touch
-yours.
+Код один и тот же, изолируют их токен и том с данными — клиенты публичного
+бота и ваши личные переписки никогда не смешаются. Тот, кто склонирует
+репозиторий, получит только **код**: токены, база и админский id лежат в ваших
+`.env` (их не коммитят), так что запустить он сможет лишь свой пустой
+экземпляр, а до вашего не дотянется.
 
-### Build options
+### Опции сборки
 
-- **Smaller image without voice:** `ffmpeg` is only needed for local Whisper
-  (`STT_BACKEND=local`). Skip it with
+- **Образ поменьше, без голоса:** `ffmpeg` нужен только для локального Whisper
+  (`STT_BACKEND=local`). Пропустить его:
   `docker build --build-arg WITH_VOICE=false -t jarvis-assistant .`
-- **Behind a TLS-inspecting (corporate) proxy:** drop your proxy's PEM bundle
-  next to the Dockerfile as `extra-ca.crt` — it is added to the container's
-  trust store automatically (the file is gitignored; never commit it).
-- If Docker Hub is blocked in your network, pull the base image through
-  Google's mirror first:
+- **За корпоративным прокси с подменой TLS:** положите PEM-бандл вашего прокси
+  рядом с Dockerfile под именем `extra-ca.crt` — он сам добавится в хранилище
+  доверия контейнера (файл в gitignore, коммитить его нельзя).
+- Если Docker Hub у вас заблокирован, сначала вытяните базовый образ через
+  зеркало Google:
   `docker pull mirror.gcr.io/library/python:3.11-slim && docker tag mirror.gcr.io/library/python:3.11-slim python:3.11-slim`
 
 ---
 
-## 3. systemd (no Docker)
+## 3. systemd (без Docker)
 
-Run directly on the host with a dedicated user and a virtualenv.
+Запуск прямо на хосте, под отдельным пользователем и в virtualenv.
 
 ```bash
-# Create a service user and app directory
+# Создать служебного пользователя и каталог приложения
 sudo useradd --system --create-home --home-dir /opt/jarvis jarvis
 sudo -u jarvis git clone https://github.com/nomadnairi/J.A.R.V.I.S.git /opt/jarvis
 
@@ -137,19 +140,19 @@ sudo -u jarvis .venv/bin/pip install --upgrade pip
 sudo -u jarvis .venv/bin/pip install -r requirements.txt
 sudo -u jarvis .venv/bin/pip install "fastapi>=0.110" "uvicorn[standard]>=0.29" "aiogram>=3.0,<4.0"
 
-# Configure
+# Настроить
 sudo -u jarvis cp .env.example .env
-sudo -u jarvis nano .env          # fill in your keys
+sudo -u jarvis nano .env          # впишите свои ключи
 sudo -u jarvis mkdir -p data logs
 
-# Install the units
+# Установить юниты
 sudo cp deploy/systemd/jarvis-api.service /etc/systemd/system/
 sudo cp deploy/systemd/jarvis-bot.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now jarvis-api jarvis-bot
 ```
 
-Manage:
+Управление:
 
 ```bash
 systemctl status jarvis-api jarvis-bot
@@ -157,7 +160,7 @@ journalctl -u jarvis-api -f
 sudo systemctl restart jarvis-api
 ```
 
-After a `git pull`, reinstall the package deps if needed and restart:
+После `git pull` при необходимости переустановите зависимости и перезапустите:
 
 ```bash
 cd /opt/jarvis && sudo -u jarvis git pull
@@ -166,24 +169,24 @@ sudo systemctl restart jarvis-api jarvis-bot
 
 ---
 
-## 4. Exposing the API safely
+## 4. Как безопасно выставить API наружу
 
-The API listens on `:8000`. For anything beyond local testing, put it behind a
-reverse proxy with TLS instead of exposing the port directly.
+API слушает `:8000`. Для всего, кроме локальных проверок, ставьте его за
+обратный прокси с TLS, а не открывайте порт напрямую.
 
-Minimal nginx example:
+Минимальный пример для nginx:
 
 ```nginx
 server {
     listen 443 ssl;
     server_name jarvis.example.com;
 
-    # ssl_certificate / ssl_certificate_key — e.g. from certbot
+    # ssl_certificate / ssl_certificate_key — например, от certbot
 
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
-        # WebSocket upgrade for /ws/{session}
+        # Апгрейд до WebSocket для /ws/{session}
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
@@ -192,7 +195,7 @@ server {
 }
 ```
 
-Then reach it with your key:
+Дальше обращайтесь со своим ключом:
 
 ```bash
 curl -s https://jarvis.example.com/chat \
@@ -201,23 +204,24 @@ curl -s https://jarvis.example.com/chat \
   -d '{"message": "Good evening."}'
 ```
 
-Checklist for a public deployment:
+Чек-лист для публичного развёртывания:
 
-- [ ] `API_KEY` is set to a long random secret.
-- [ ] Firewall allows only 443 (and 22); `:8000` is not exposed directly.
-- [ ] TLS terminated at the proxy.
-- [ ] `ALLOW_SHELL` / `ALLOW_FILE_WRITE` / `ALLOW_DESKTOP_CONTROL` stay `false`
-      unless you truly need them.
-- [ ] `TELEGRAM_ALLOWED_USERS` restricts the bot to your own user IDs.
+- [ ] `API_KEY` — длинный случайный секрет.
+- [ ] Файрвол пропускает только 443 (и 22); `:8000` наружу не смотрит.
+- [ ] TLS терминируется на прокси.
+- [ ] `ALLOW_SHELL` / `ALLOW_FILE_WRITE` / `ALLOW_DESKTOP_CONTROL` остаются
+      `false`, если они вам правда не нужны.
+- [ ] `TELEGRAM_ALLOWED_USERS` ограничивает бота вашими user id.
 
 ---
 
-## 5. Health & troubleshooting
+## 5. Здоровье и разбор проблем
 
-- **Health:** `GET /health` returns per-subsystem checks (LLM, memory,
-  integrations, security posture). `ok: true` means all green.
-- **Logs:** Docker — `docker compose logs -f`; systemd — `journalctl -u jarvis-api -f`.
-- **Audit trail:** sensitive actions are recorded in `logs/audit.log`
-  (secrets redacted).
-- **Bot doesn't answer:** confirm `TELEGRAM_BOT_TOKEN` is set and the process is
-  running; the bot uses outbound long-polling, so no inbound port is required.
+- **Здоровье:** `GET /health` возвращает проверки по подсистемам (модель,
+  память, интеграции, состояние безопасности). `ok: true` — всё зелёное.
+- **Логи:** Docker — `docker compose logs -f`; systemd —
+  `journalctl -u jarvis-api -f`.
+- **След аудита:** чувствительные действия пишутся в `logs/audit.log`
+  (секреты вымараны).
+- **Бот не отвечает:** убедитесь, что `TELEGRAM_BOT_TOKEN` задан и процесс
+  живёт; бот работает исходящим long-polling, входящий порт ему не нужен.
