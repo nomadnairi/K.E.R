@@ -7,6 +7,8 @@ export const LINKS = {
   releases: 'https://github.com/nomadnairi/K.E.R/releases',
   releasesLatestApi:
     'https://api.github.com/repos/nomadnairi/K.E.R/releases/latest',
+  /** The full list — unlike `/releases/latest`, it includes prereleases. */
+  releasesApi: 'https://api.github.com/repos/nomadnairi/K.E.R/releases',
   issues: 'https://github.com/nomadnairi/K.E.R/issues',
   license: 'https://github.com/nomadnairi/K.E.R/blob/main/LICENSE',
   dashboard: 'https://dashboard.ker-ai.online',

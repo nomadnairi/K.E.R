@@ -1,3 +1,4 @@
+import { motion, useReducedMotion } from 'framer-motion';
 import { useEffect } from 'react';
 import { Outlet, Route, Routes, useLocation } from 'react-router-dom';
 
@@ -17,13 +18,26 @@ import { SecurityPage } from './pages/SecurityPage';
 /** Land at the top of every page on navigation, as a normal site would. */
 function ScrollToTop() {
   const { pathname } = useLocation();
-  useEffect(() => window.scrollTo(0, 0), [pathname]);
+
+  useEffect(() => {
+    // `scroll-behavior: smooth` is set globally so in-page anchors glide. That
+    // same rule turns this jump into a long crawl back up the page the user
+    // has just left — the single jankiest thing about navigating the site.
+    // Suspend it for this one call and put it back.
+    const root = document.documentElement;
+    const previous = root.style.scrollBehavior;
+    root.style.scrollBehavior = 'auto';
+    window.scrollTo(0, 0);
+    root.style.scrollBehavior = previous;
+  }, [pathname]);
+
   return null;
 }
 
 function Layout() {
   const { pathname } = useLocation();
   const locale = localeFromPath(pathname);
+  const still = useReducedMotion();
 
   // Keep <html lang> honest for screen readers and search engines.
   useEffect(() => {
@@ -34,9 +48,26 @@ function Layout() {
     <LocaleContext.Provider value={locale}>
       <ScrollToTop />
       <Nav />
-      <main className="min-h-screen">
-        <Outlet />
-      </main>
+      {/* Keyed on the path so each route plays its own entrance: without it a
+          new page appears fully formed in the same frame the old one vanishes,
+          which reads as a flicker rather than a transition. No exit animation —
+          waiting for one to finish before drawing the next page costs more in
+          felt latency than the polish is worth. */}
+      {still ? (
+        <main className="min-h-screen">
+          <Outlet />
+        </main>
+      ) : (
+        <motion.main
+          key={pathname}
+          className="min-h-screen"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+        >
+          <Outlet />
+        </motion.main>
+      )}
       <Footer />
     </LocaleContext.Provider>
   );

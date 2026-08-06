@@ -152,5 +152,9 @@ jobs:
           tag_name: v${{ steps.ver.outputs.version }}
           name: "KER v${{ steps.ver.outputs.version }}"
           body_path: ${{ steps.ver.outputs.notes }}
-          prerelease: true
+          # Publish as a full release, not a prerelease. GitHub's
+          # `/releases/latest` endpoint skips prereleases entirely, so flagging
+          # every build as one made that endpoint 404 — and the site's download
+          # page, which reads it, fell back to a bare link with no version.
+          prerelease: false
           files: dist/*Setup*.exe

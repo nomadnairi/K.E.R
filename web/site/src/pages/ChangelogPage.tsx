@@ -27,7 +27,7 @@ export function ChangelogPage() {
 
   useEffect(() => {
     let alive = true;
-    fetch(`https://api.github.com/repos/nomadnairi/K.E.R/releases?per_page=20`, {
+    fetch(`${LINKS.releasesApi}?per_page=20`, {
       headers: { Accept: 'application/vnd.github+json' },
     })
       .then((r) => {

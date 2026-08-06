@@ -34,7 +34,33 @@ interface GithubRelease {
   published_at: string;
   html_url: string;
   body?: string;
+  draft?: boolean;
   assets?: GithubAsset[];
+}
+
+/**
+ * The newest published release, whether or not it is flagged as a prerelease.
+ *
+ * `/releases/latest` deliberately skips prereleases and drafts, so a project
+ * that ships everything as a prerelease gets a bare 404 from it — and the
+ * download page falls back to a plain link, looking as though nothing is
+ * published at all. The full list does include them, so fall through to it.
+ */
+async function fetchNewestRelease(): Promise<GithubRelease> {
+  const headers = { Accept: 'application/vnd.github+json' };
+
+  const latest = await fetch(LINKS.releasesLatestApi, { headers });
+  if (latest.ok) return (await latest.json()) as GithubRelease;
+  if (latest.status !== 404) {
+    throw new Error(`GitHub responded ${latest.status}`);
+  }
+
+  const all = await fetch(`${LINKS.releasesApi}?per_page=10`, { headers });
+  if (!all.ok) throw new Error(`GitHub responded ${all.status}`);
+
+  const published = ((await all.json()) as GithubRelease[]).find((r) => !r.draft);
+  if (!published) throw new Error('no published release');
+  return published;
 }
 
 function pickWindows(assets: GithubAsset[]): ReleaseAsset | null {
@@ -62,13 +88,7 @@ export function useRelease(): State {
   useEffect(() => {
     let alive = true;
 
-    fetch(LINKS.releasesLatestApi, {
-      headers: { Accept: 'application/vnd.github+json' },
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`GitHub responded ${r.status}`);
-        return r.json() as Promise<GithubRelease>;
-      })
+    fetchNewestRelease()
       .then((data) => {
         if (!alive) return;
         setState({
