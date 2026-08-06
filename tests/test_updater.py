@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import pytest
+
 from jarvis.core.updater import (
     UpdateInfo,
     check_github,
+    fetch_checksum_text,
     is_newer,
+    parse_sha256_text,
     parse_version,
+    sha256_of_file,
+    verify_sha256,
 )
 
 
@@ -24,6 +30,8 @@ _RELEASES = [
     "html_url": "https://gh/rel/1.7.0", "body": "notes",
     "assets": [{"name": "JARVIS-Setup.exe",
                 "browser_download_url": "https://gh/dl/setup.exe"},
+                {"name": "JARVIS-Setup.exe.sha256",
+                "browser_download_url": "https://gh/dl/setup.exe.sha256"},
                 {"name": "JARVIS-windows-amd64.exe",
                 "browser_download_url": "https://gh/dl/portable.exe"}]},
     {"tag_name": "v1.6.0", "prerelease": False, "draft": False,
@@ -38,6 +46,20 @@ def test_check_finds_newer_prerelease():
     assert info.prerelease is True
     # Installer asset is preferred for the download link.
     assert info.download_url == "https://gh/dl/setup.exe"
+    # Its checksum sibling is matched by the installer's asset *name*
+    # ("JARVIS-Setup.exe" + ".sha256"), not by parsing its download URL —
+    # the fixture deliberately gives them unrelated URL slugs.
+    assert info.sha256_url == "https://gh/dl/setup.exe.sha256"
+
+
+def test_check_leaves_sha256_url_empty_when_no_sibling_asset():
+    releases = [{"tag_name": "v2.0.0", "prerelease": False, "draft": False,
+                "html_url": "https://gh/rel/2.0.0", "body": "",
+                "assets": [{"name": "JARVIS-Setup.exe",
+                            "browser_download_url": "https://gh/dl/2/setup.exe"}]}]
+    info = check_github("1.0.0", fetch=lambda url: releases)
+    assert info.download_url == "https://gh/dl/2/setup.exe"
+    assert info.sha256_url == ""
 
 
 def test_stable_channel_ignores_prerelease():
@@ -87,3 +109,90 @@ def test_download_rejects_non_https(tmp_path):
     import pytest as _pt
     with _pt.raises(ValueError):
         download("http://x/setup.exe", str(tmp_path / "s.exe"))
+
+
+# -- integrity verification (jarvis/core/updater.py) ---------------------------
+
+
+def test_sha256_of_file_matches_hashlib(tmp_path):
+    import hashlib
+
+    path = tmp_path / "setup.exe"
+    path.write_bytes(b"totally a real installer" * 1000)
+    assert sha256_of_file(str(path)) == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_verify_sha256_accepts_matching_digest_case_insensitively(tmp_path):
+    path = tmp_path / "setup.exe"
+    path.write_bytes(b"payload")
+    digest = sha256_of_file(str(path))
+    assert verify_sha256(str(path), digest) is True
+    assert verify_sha256(str(path), digest.upper()) is True
+
+
+def test_verify_sha256_rejects_tampered_file(tmp_path):
+    path = tmp_path / "setup.exe"
+    path.write_bytes(b"payload")
+    digest = sha256_of_file(str(path))
+    path.write_bytes(b"tampered payload")  # file changed after the digest was taken
+    assert verify_sha256(str(path), digest) is False
+
+
+def test_verify_sha256_rejects_empty_expected_digest(tmp_path):
+    """A missing/blank checksum must never be treated as a pass."""
+    path = tmp_path / "setup.exe"
+    path.write_bytes(b"payload")
+    assert verify_sha256(str(path), "") is False
+
+
+def test_parse_sha256_text_accepts_bare_digest():
+    digest = "a" * 64
+    assert parse_sha256_text(digest) == digest
+    assert parse_sha256_text(digest.upper()) == digest  # normalized to lowercase
+    assert parse_sha256_text(f"  {digest}  \n") == digest
+
+
+def test_parse_sha256_text_accepts_sha256sum_two_column_format():
+    digest = "b" * 64
+    assert parse_sha256_text(f"{digest}  JARVIS-Setup.exe\n") == digest
+
+
+def test_parse_sha256_text_rejects_garbage():
+    with pytest.raises(ValueError):
+        parse_sha256_text("not a checksum file")
+    with pytest.raises(ValueError):
+        parse_sha256_text("")
+    with pytest.raises(ValueError):
+        parse_sha256_text("g" * 64)  # right length, not hex
+
+
+def test_fetch_checksum_text_rejects_non_https():
+    with pytest.raises(ValueError):
+        fetch_checksum_text("http://x/setup.exe.sha256")
+
+
+def test_fetch_checksum_text_reads_body_via_injected_opener():
+    import io
+
+    class FakeResp(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): self.close()
+
+    class FakeOpener:
+        def open(self, req, timeout=None):
+            return FakeResp(b"c" * 64)
+
+    text = fetch_checksum_text("https://gh/dl/setup.exe.sha256", opener=FakeOpener())
+    assert text == "c" * 64
+
+
+def test_end_to_end_tampered_download_fails_verification(tmp_path):
+    """The exact scenario the auto-updater must refuse to run."""
+    genuine = tmp_path / "genuine.exe"
+    genuine.write_bytes(b"the real installer bytes")
+    published_digest = sha256_of_file(str(genuine))
+
+    tampered = tmp_path / "downloaded.exe"
+    tampered.write_bytes(b"a different, tampered installer")
+
+    assert verify_sha256(str(tampered), published_digest) is False

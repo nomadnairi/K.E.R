@@ -105,6 +105,21 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /Odist deploy/desktop/installer.iss
           Write-Host "Installer built:"; Get-ChildItem dist -Filter *Setup*.exe
 
+      # The desktop app's auto-updater (jarvis/core/updater.py) refuses to run
+      # a downloaded installer unless it hashes to a checksum published as a
+      # sibling release asset named "<installer-filename>.sha256" — a bare
+      # lowercase hex digest, nothing else in the file. Without this asset,
+      # auto-update still works but always falls back to opening the browser
+      # for a manual install (fail-closed, not fail-crash).
+      - name: Checksum the installer
+        if: matrix.target == 'windows-amd64'
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist -Filter *Setup*.exe | Select-Object -First 1)
+          $hash = (Get-FileHash -Algorithm SHA256 $setup.FullName).Hash.ToLower()
+          Set-Content -NoNewline -Path "$($setup.FullName).sha256" -Value $hash
+          Write-Host "SHA256($($setup.Name)) = $hash"
+
       # Both builds stay downloadable from the run page — handy for debugging a
       # build without publishing anything.
       - name: Upload artifact
@@ -117,12 +132,13 @@ jobs:
       # On Windows the installer *is* the download: shipping the portable exe
       # beside it only offers the same product twice (and the auto-updater
       # fetches KER-Setup.exe anyway). Other platforms have no installer, so
-      # they attach what they built.
+      # they attach what they built. The ".sha256" glob picks up the checksum
+      # file written above alongside the installer.
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.target == 'windows-amd64' && 'dist/*Setup*.exe' || 'dist/*' }}
+          files: ${{ matrix.target == 'windows-amd64' && 'dist/*Setup*.exe*' || 'dist/*' }}
 
       # The version comes from the source, never from a literal in here: a
       # hardcoded tag quietly re-publishes the previous release the moment
@@ -157,4 +173,4 @@ jobs:
           # every build as one made that endpoint 404 — and the site's download
           # page, which reads it, fell back to a bare link with no version.
           prerelease: false
-          files: dist/*Setup*.exe
+          files: dist/*Setup*.exe*

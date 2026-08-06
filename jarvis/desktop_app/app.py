@@ -158,7 +158,7 @@ def run_app() -> int:
         done = Signal(str, str)  # reply, error
         chunk = Signal(str)      # one streamed piece of the reply
         voice = Signal(str, str, str, str)  # transcript, reply, audio_path, error
-        update_ready = Signal(bool, str, str, bool)  # available, latest, url, explicit
+        update_ready = Signal(bool, str, str, str, bool)  # available, latest, url, sha256_url, explicit
         proactive = Signal(str)  # a message KER sent unprompted (local mode only)
 
     # -- login dialog ---------------------------------------------------------
@@ -403,12 +403,12 @@ def run_app() -> int:
                     include_prerelease=(config.update_channel != "stable"))
                 self.bridge.update_ready.emit(info.available, info.latest,
                                             info.download_url or info.url,
-                                            explicit)
+                                            info.sha256_url, explicit)
 
             threading.Thread(target=_work, daemon=True).start()
 
         def _on_update(self, available: bool, latest: str, url: str,
-                    explicit: bool) -> None:
+                    sha256_url: str, explicit: bool) -> None:
             from PySide6.QtWidgets import QMessageBox
             if not available:
                 if explicit:
@@ -417,25 +417,34 @@ def run_app() -> int:
                 return
             # Auto-update (opt-in): apply straight away; otherwise ask.
             if config.auto_update and url:
-                self._apply_update(url, latest)
+                self._apply_update(url, sha256_url, latest)
                 return
             ans = QMessageBox.question(
                 self, "Доступно обновление",
                 f"Вышла версия {latest}. Установить сейчас?")
             if ans == QMessageBox.StandardButton.Yes and url:
-                self._apply_update(url, latest)
+                self._apply_update(url, sha256_url, latest)
 
-        def _apply_update(self, url: str, latest: str = "") -> None:
-            """Download the Windows installer and launch it silently, then quit.
+        def _apply_update(self, url: str, sha256_url: str = "", latest: str = "") -> None:
+            """Download the Windows installer, verify its SHA-256, then launch it.
 
-            On non-Windows or for a non-installer URL, just open the download.
+            The installer never runs unless it hashes to the checksum published
+            alongside it in the GitHub release — a compromised or truncated
+            download (or a tampered mirror) is refused, not executed. On
+            non-Windows, a non-installer URL, or a missing/failed checksum, we
+            fall back to just opening the page for the user to handle manually.
             """
             import sys
             import tempfile
             import webbrowser
             from pathlib import Path
 
-            from jarvis.core.updater import download
+            from jarvis.core.updater import (
+                download,
+                fetch_checksum_text,
+                parse_sha256_text,
+                verify_sha256,
+            )
             if sys.platform != "win32" or not url.lower().endswith(".exe"):
                 webbrowser.open(url)
                 return
@@ -445,6 +454,22 @@ def run_app() -> int:
             except Exception:  # noqa: BLE001 - fall back to the browser
                 webbrowser.open(url)
                 return
+
+            try:
+                if not sha256_url:
+                    raise ValueError("no checksum published for this release")
+                expected = parse_sha256_text(fetch_checksum_text(sha256_url))
+                if not verify_sha256(str(dest), expected):
+                    raise ValueError("downloaded installer does not match its checksum")
+            except Exception as exc:  # noqa: BLE001 - fail closed, never run unverified
+                logger.warning("Update integrity check failed, refusing to run installer: %s", exc)
+                try:
+                    dest.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                webbrowser.open(url)
+                return
+
             import subprocess
             try:
                 # Inno Setup silent install; it replaces files after we exit.
