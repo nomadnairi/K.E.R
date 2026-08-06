@@ -144,6 +144,21 @@ def create_app(engine: JarvisEngine | None = None,
                   redoc_url="/redoc" if _docs else None,
                   openapi_url="/openapi.json" if _docs else None)
 
+    # Throttle brute-forceable endpoints (login, registration, the Telegram
+    # code exchange) per client IP, before CORS so a rate-limited browser
+    # caller still gets a readable 429 rather than a blocked cross-origin
+    # response. One middleware for every such route, not a check bolted onto
+    # each handler — see jarvis/api/rate_limit.py for why these routes and
+    # not others.
+    if settings.api_auth_rate_limit_enabled:
+        from jarvis.api.rate_limit import SensitiveRouteRateLimit, default_limits
+        app.add_middleware(
+            SensitiveRouteRateLimit,
+            limits=default_limits(settings.api_auth_rate_limit_capacity,
+                                settings.api_auth_rate_limit_window_seconds),
+            trust_proxy_headers=settings.api_trust_proxy_headers,
+        )
+
     # Every interface is a page on some other origin — the desktop app's own
     # window, a locally run dashboard — so without this the browser refuses the
     # request and the UI shows nothing at all.

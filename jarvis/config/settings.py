@@ -257,6 +257,19 @@ class Settings(BaseSettings):
     #: Serve the interactive OpenAPI docs (/docs, /redoc, /openapi.json). Handy
     #: in development; turn OFF in production so the API surface isn't published.
     api_docs_enabled: bool = True
+    #: Throttle brute-forceable endpoints (login, registration, the Telegram
+    #: code exchange) per client IP. On by default — a login form with no
+    #: rate limit at all is a bigger risk than a false positive here.
+    api_auth_rate_limit_enabled: bool = True
+    #: Attempts allowed per window, per IP, per endpoint.
+    api_auth_rate_limit_capacity: int = Field(default=10, gt=0)
+    api_auth_rate_limit_window_seconds: float = Field(default=60.0, gt=0)
+    #: Trust ``X-Forwarded-For`` for the caller's address instead of the raw
+    #: socket peer. Only turn this on when the API is genuinely reached
+    #: through a reverse proxy that sets the header itself (see
+    #: deploy/nginx) — otherwise any caller can pick its own rate-limit
+    #: bucket (or someone else's) by sending an arbitrary value.
+    api_trust_proxy_headers: bool = False
 
     # --- Accounts & licensing (per-user login for exe/apk clients) ---
     #: Enable username/password accounts + license checks on the API.
