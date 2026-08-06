@@ -30,8 +30,32 @@ def _app(api_key: str = ""):
 def test_root_and_health():
     with TestClient(_app()) as client:
         assert client.get("/").json()["name"] == "KER"
-        health = client.get("/health").json()
-        assert "ok" in health and isinstance(health["checks"], list)
+        # /health is a bare liveness probe now — no provider names, no
+        # capability states, no security-audit findings. That detail moved
+        # to /health/full, which only the owner can reach (see below).
+        assert client.get("/health").json() == {"ok": True}
+
+
+def test_health_full_is_open_only_when_the_whole_server_is_open():
+    """With no shared key and no accounts, every caller *is* the owner —
+    the same rule /dashboard/mcp already relies on for single-user/dev use.
+    """
+    with TestClient(_app()) as client:
+        r = client.get("/health/full")
+        assert r.status_code == 200
+        body = r.json()
+        assert "ok" in body and isinstance(body["checks"], list)
+        assert any(c["name"] == "llm" for c in body["checks"])
+
+
+def test_health_full_requires_the_shared_key_once_one_is_set():
+    with TestClient(_app(api_key="secret-key")) as client:
+        anon = client.get("/health/full")
+        assert anon.status_code == 401
+
+        owner = client.get("/health/full", headers={"X-API-Key": "secret-key"})
+        assert owner.status_code == 200
+        assert isinstance(owner.json()["checks"], list)
 
 
 def test_dashboard_page_served():

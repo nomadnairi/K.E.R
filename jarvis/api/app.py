@@ -3,7 +3,8 @@ FastAPI application factory.
 
 Endpoints:
     GET  /                — service info (open).
-    GET  /health          — diagnostics (open).
+    GET  /health          — minimal liveness probe (open; used by Docker healthcheck).
+    GET  /health/full     — full diagnostics (owner only).
     POST /chat            — send a message, get a reply (auth).
     WS   /ws/{session}    — stream a reply chunk by chunk (auth via ?key=).
     POST /auth/login …    — per-user accounts (only when AUTH_ENABLED).
@@ -308,6 +309,26 @@ def create_app(engine: JarvisEngine | None = None,
 
     @app.get("/health")
     async def health() -> dict:
+        """Liveness probe only: no auth, no detail, safe to leave open.
+
+        Anything more — which providers are configured, which dangerous
+        capabilities are enabled, security-audit findings, config validation
+        errors — is a map of the server's attack surface handed to anyone
+        who can reach the port. That detail moved to /health/full, which
+        only the owner can read. Docker's healthcheck only cares about the
+        HTTP status code, so this change is invisible to it.
+        """
+        return {"ok": True}
+
+    @app.get("/health/full")
+    async def health_full(_: str = Depends(require_owner)) -> dict:
+        """Full diagnostics: providers, capabilities, config, security audit.
+
+        Same payload /health used to return before it was locked down —
+        moved here rather than removed, so `jarvis doctor`-style operator
+        tooling still works, just behind ownership instead of the open
+        internet.
+        """
         from jarvis.core.diagnostics import all_ok, diagnose
         checks = diagnose(engine)
         return {
