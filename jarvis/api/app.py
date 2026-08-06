@@ -534,7 +534,7 @@ def create_app(engine: JarvisEngine | None = None,
         except WebSocketDisconnect:
             pass
         finally:
-            engine.container.devices.unregister(principal)
+            engine.container.devices.unregister(principal, device_id)
 
     # -- dashboard (Command Deck web UI) -----------------------------------
 

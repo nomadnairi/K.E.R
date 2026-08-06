@@ -50,16 +50,18 @@ class _AutoRespondingWebSocket:
     without needing a second real WebSocket thread in the test.
     """
 
-    def __init__(self, registry) -> None:
+    def __init__(self, registry, *, principal: str = "shared") -> None:
         self._registry = registry
+        self._principal = principal
 
     async def send_text(self, text: str) -> None:
         msg = json.loads(text)
         assert msg["type"] == "tool_call"
 
         async def _reply():
-            self._registry.resolve(msg["call_id"],
-                                    content=f"Opened {msg['arguments']['url']} on the PC.")
+            self._registry.resolve(
+                self._principal, msg["call_id"],
+                content=f"Opened {msg['arguments']['url']} on the PC.")
 
         asyncio.ensure_future(_reply())
 

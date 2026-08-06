@@ -28,7 +28,7 @@ def test_register_and_unregister():
     ws = _FakeWebSocket()
     registry.register("user:ann", ws, "device-1", capabilities=["desktop.open_url"])
     assert registry.is_connected("user:ann") is True
-    registry.unregister("user:ann")
+    registry.unregister("user:ann", "device-1")
     assert registry.is_connected("user:ann") is False
 
 
@@ -141,6 +141,84 @@ async def test_a_users_own_call_id_cannot_be_used_to_resolve_another_users_call(
     result = await registry.call("user:ann", "desktop.open_url",
                                 {"url": "https://a"}, timeout=2.0)
     assert result.text == "Ann's real result"
+
+
+# -- per-account multi-device (the A3 fix) -----------------------------------
+#
+# _connections used to be keyed by principal alone, so a second device
+# connecting for the same account silently evicted the first — even though
+# the module docstring already claimed (principal, device_id) keying. These
+# tests prove the real behaviour now matches that claim.
+
+
+def test_a_second_device_does_not_evict_the_first():
+    registry = DeviceRegistry()
+    ws1, ws2 = _FakeWebSocket(), _FakeWebSocket()
+    registry.register("user:ann", ws1, "phone")
+    registry.register("user:ann", ws2, "laptop")
+
+    assert registry.is_connected("user:ann") is True
+    devices = {d["device_id"] for d in registry.describe("user:ann")}
+    assert devices == {"phone", "laptop"}
+
+
+def test_unregistering_one_device_leaves_the_other_connected():
+    registry = DeviceRegistry()
+    ws1, ws2 = _FakeWebSocket(), _FakeWebSocket()
+    registry.register("user:ann", ws1, "phone")
+    registry.register("user:ann", ws2, "laptop")
+
+    registry.unregister("user:ann", "phone")
+
+    assert registry.is_connected("user:ann") is True
+    assert [d["device_id"] for d in registry.describe("user:ann")] == ["laptop"]
+
+
+def test_unregistering_the_last_device_marks_the_account_offline():
+    registry = DeviceRegistry()
+    ws = _FakeWebSocket()
+    registry.register("user:ann", ws, "phone")
+    registry.unregister("user:ann", "phone")
+    assert registry.is_connected("user:ann") is False
+
+
+@pytest.mark.asyncio
+async def test_call_targets_a_specific_device_id_when_given():
+    registry = DeviceRegistry()
+    phone, laptop = _FakeWebSocket(), _FakeWebSocket()
+    registry.register("user:ann", phone, "phone")
+    registry.register("user:ann", laptop, "laptop")
+
+    async def respond_on_laptop():
+        await asyncio.sleep(0.01)
+        call_id = laptop.sent[0]["call_id"]
+        registry.resolve("user:ann", call_id, content="done on laptop")
+
+    asyncio.ensure_future(respond_on_laptop())
+    result = await registry.call("user:ann", "desktop.open_url", {"url": "https://x"},
+                                timeout=2.0, device_id="laptop")
+
+    assert result.text == "done on laptop"
+    assert phone.sent == []  # the other device never saw the call
+
+
+@pytest.mark.asyncio
+async def test_call_without_a_device_id_uses_the_most_recently_connected():
+    registry = DeviceRegistry()
+    old, new = _FakeWebSocket(), _FakeWebSocket()
+    registry.register("user:ann", old, "old-laptop")
+    registry.register("user:ann", new, "new-laptop")
+
+    async def respond():
+        await asyncio.sleep(0.01)
+        call_id = new.sent[0]["call_id"]
+        registry.resolve("user:ann", call_id, content="ok")
+
+    asyncio.ensure_future(respond())
+    await registry.call("user:ann", "desktop.open_url", {"url": "https://x"}, timeout=2.0)
+
+    assert old.sent == []
+    assert len(new.sent) == 1
 
 
 @pytest.mark.asyncio

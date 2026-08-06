@@ -11,10 +11,14 @@ a device online and relays a tool call to it, correlating the reply by id.
 Kept deliberately simple for what exists today (every action completes in
 under a couple of seconds): a plain bounded ``await`` per call, the same
 blocking-with-timeout shape :class:`~jarvis.security.confirm.ConfirmationBroker`
-already uses — not a task queue. Keyed by ``(principal, device_id)`` rather
-than just ``principal`` so a second device type (Android, Raspberry Pi, ...)
-can be added later without reshaping this map; nothing today picks between
-multiple devices for one principal.
+already uses — not a task queue. Connections are keyed by ``(principal,
+device_id)``, not ``principal`` alone: an account can have more than one
+device online (a desktop PC and, later, a phone) without a second one
+silently disconnecting the first — which is exactly what a bare-``principal``
+key did before this module was audited. ``_pending`` call correlation is
+additionally keyed by ``(principal, call_id)`` so ``call_id`` — a short
+sequential counter shared by the whole process — can never be guessed or
+reused across accounts.
 """
 
 from __future__ import annotations
@@ -45,7 +49,10 @@ class DeviceRegistry:
 
     def __init__(self, *, timeout: float = 30.0) -> None:
         self._timeout = timeout
-        self._connections: dict[str, _Connection] = {}
+        # (principal, device_id) -> connection. Plain dicts preserve
+        # insertion order, which `call()` relies on to pick "the most
+        # recently connected device" when a caller doesn't name one.
+        self._connections: dict[tuple[str, str], _Connection] = {}
         # Keyed by (principal, call_id), not call_id alone: call_id is a short
         # sequential counter shared by the whole process ("dc1", "dc2", ...),
         # so without the principal in the key, any connected device — any
@@ -58,41 +65,56 @@ class DeviceRegistry:
 
     def register(self, principal: str, websocket: object, device_id: str,
                 capabilities: list[str] | None = None) -> None:
-        self._connections[principal] = _Connection(
+        self._connections[(principal, device_id)] = _Connection(
             websocket=websocket, device_id=device_id,
             capabilities=capabilities or [])
         logger.info("Device connected: principal=%s device_id=%s", principal,
                     device_id)
 
-    def unregister(self, principal: str) -> None:
-        self._connections.pop(principal, None)
-        logger.info("Device disconnected: principal=%s", principal)
+    def unregister(self, principal: str, device_id: str) -> None:
+        self._connections.pop((principal, device_id), None)
+        logger.info("Device disconnected: principal=%s device_id=%s",
+                    principal, device_id)
 
     def is_connected(self, principal: str) -> bool:
-        return principal in self._connections
+        return any(p == principal for p, _ in self._connections)
 
     def describe(self, principal: str) -> list[dict]:
-        """The devices this principal has online, for the dashboard to list.
+        """Every device this principal has online right now, for the
+        dashboard to list — genuinely more than one, now that connections
+        are keyed by ``(principal, device_id)`` instead of ``principal``
+        alone."""
+        return [
+            {"device_id": conn.device_id, "capabilities": list(conn.capabilities),
+            "online": True}
+            for (p, _), conn in self._connections.items() if p == principal
+        ]
 
-        Returns a list even though one principal currently has at most one
-        connection — the map is keyed for more, and a caller written against a
-        list today needs no change when that day comes.
+    def _pick(self, principal: str, device_id: str | None) -> _Connection | None:
+        """The connection a tool call should go to.
+
+        A specific ``device_id`` is used if given and online; otherwise the
+        most recently connected device for this principal — there is no UI
+        yet for a caller to pick between several, so "whichever came online
+        last" is the least surprising default until one exists.
         """
-        conn = self._connections.get(principal)
-        if conn is None:
-            return []
-        return [{
-            "device_id": conn.device_id,
-            "capabilities": list(conn.capabilities),
-            "online": True,
-        }]
+        if device_id is not None:
+            return self._connections.get((principal, device_id))
+        matches = [c for (p, _), c in self._connections.items() if p == principal]
+        return matches[-1] if matches else None
 
     # -- relaying tool calls ---------------------------------------------------
 
     async def call(self, principal: str, tool: str, arguments: dict,
-                    timeout: float | None = None) -> SkillResult:
-        """Relay a tool call to the connected device for ``principal``."""
-        conn = self._connections.get(principal)
+                    timeout: float | None = None, *,
+                    device_id: str | None = None) -> SkillResult:
+        """Relay a tool call to a connected device for ``principal``.
+
+        ``device_id`` picks a specific device when the principal has more
+        than one online; omitted, the most recently connected one is used
+        (see :meth:`_pick`).
+        """
+        conn = self._pick(principal, device_id)
         if conn is None:
             return SkillResult(
                 text="No PC is connected right now — open the app on the "
