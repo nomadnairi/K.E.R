@@ -487,14 +487,37 @@ def create_app(engine: JarvisEngine | None = None,
         _weather_cache.update(at=_time.time(), data=data)
         return data
 
+    def _tenant_prefix(principal: str) -> str | None:
+        """The caller's own memory/session namespace, or ``None``.
+
+        This engine — and the memory database behind it — is shared by every
+        request the API serves. When accounts are enabled, several distinct
+        principals genuinely share one process, and every real chat session
+        already lives under ``f"{principal}::{session_id}"`` (see
+        ``_scoped``), so filtering by that prefix here shows each caller only
+        their own conversations and memories rather than everyone's.
+
+        With accounts disabled there is exactly one legitimate caller (the
+        holder of the single ``API_KEY``, or nobody at all in open dev mode),
+        so there is nothing to scope against — and a local/CLI caller may
+        have written memory under a bare id like ``"default"`` with no
+        principal prefix at all, which a prefix filter would hide from them.
+        Returning ``None`` here keeps that single-tenant case working exactly
+        as it always has.
+        """
+        return f"{principal}::" if service is not None else None
+
     @app.get("/dashboard/sessions")
-    async def dashboard_sessions(_: str = Depends(require_principal)) -> dict:
+    async def dashboard_sessions(
+            principal: str = Depends(require_principal)) -> dict:
         """Recent conversations (real history) for the chat sidebar."""
         import asyncio as _a
         mem = getattr(engine, "memory", None)
         if mem is None or getattr(mem, "conversations", None) is None:
             return {"sessions": []}
-        rows = await _a.to_thread(mem.conversations.recent, 20)
+        rows = await _a.to_thread(
+            mem.conversations.recent, 20,
+            session_prefix=_tenant_prefix(principal))
         return {"sessions": rows}
 
     def _broker():
@@ -566,28 +589,61 @@ def create_app(engine: JarvisEngine | None = None,
             return
 
     @app.get("/dashboard/tasks")
-    async def dashboard_tasks(_: str = Depends(require_principal)) -> dict:
-        """Scheduled automations + reminders (read from the shared store)."""
+    async def dashboard_tasks(
+            authorization: str | None = Header(default=None),
+            x_api_key: str | None = Header(default=None),
+            _: str = Depends(require_principal)) -> dict:
+        """Scheduled automations + reminders — the caller's own.
+
+        Automations and reminders are always created through the Telegram
+        bot, keyed by the creator's numeric Telegram id (see
+        jarvis.interfaces.automations / .reminders) — this API only ever
+        reads them. That used to mean an unscoped "SELECT * ... LIMIT 50",
+        handing every account on a shared server everyone's scheduled tasks.
+        Scoping means resolving which Telegram id, if any, the caller's
+        account is linked to.
+        """
         import asyncio as _a
 
         from jarvis.interfaces.automations import AutomationStore
         from jarvis.interfaces.reminders import ReminderStore
 
+        telegram_owner = ""
+        if service is not None:
+            token = None
+            if authorization and authorization.startswith("Bearer "):
+                token = authorization[len("Bearer "):]
+            token = token or x_api_key
+            account = service.validate_token(token) if token else None
+            if account and account.telegram_user_id:
+                telegram_owner = str(account.telegram_user_id)
+
         def _read() -> dict:
-            autos, rems = [], []
+            # Accounts are on, but this one has no linked Telegram: it cannot
+            # own an automation or reminder (only the bot creates them), so
+            # there is nothing to show rather than everyone else's.
+            if service is not None and not telegram_owner:
+                return {"automations": [], "reminders": []}
             a_store = AutomationStore(settings.memory_db_path)
             r_store = ReminderStore(settings.memory_db_path)
             try:
-                rows = a_store._conn.execute(  # noqa: SLF001 - read-only view
-                    "SELECT id, prompt, kind, next_ts FROM automations "
-                    "WHERE enabled = 1 ORDER BY next_ts LIMIT 50").fetchall()
+                if telegram_owner:
+                    a_rows = a_store.list_active(telegram_owner, limit=50)
+                    r_rows = r_store.list_active(telegram_owner, limit=50)
+                else:
+                    # No accounts on this server: a single-tenant deployment
+                    # has exactly one legitimate caller, so "everything" is
+                    # already "their own" — the original, unscoped behaviour.
+                    a_rows = a_store._conn.execute(  # noqa: SLF001 - read-only
+                        "SELECT * FROM automations WHERE enabled = 1 "
+                        "ORDER BY next_ts LIMIT 50").fetchall()
+                    r_rows = r_store._conn.execute(  # noqa: SLF001
+                        "SELECT * FROM reminders WHERE fired = 0 "
+                        "ORDER BY due_ts LIMIT 50").fetchall()
                 autos = [{"id": r["id"], "prompt": r["prompt"], "kind": r["kind"],
-                        "next_ts": r["next_ts"]} for r in rows]
-                rrows = r_store._conn.execute(  # noqa: SLF001
-                    "SELECT id, text, due_ts FROM reminders WHERE fired = 0 "
-                    "ORDER BY due_ts LIMIT 50").fetchall()
+                        "next_ts": r["next_ts"]} for r in a_rows]
                 rems = [{"id": r["id"], "text": r["text"], "due_ts": r["due_ts"]}
-                        for r in rrows]
+                        for r in r_rows]
             finally:
                 a_store.close()
                 r_store.close()
@@ -777,30 +833,54 @@ def create_app(engine: JarvisEngine | None = None,
                                         "assistant.")
         return memory
 
+    def _own_session_id(principal: str, session: str) -> str | None:
+        """The exact session a caller may name directly.
+
+        In multi-tenant mode the caller's own prefix is stitched onto
+        whatever session name they gave — they can browse *within* their own
+        sessions, but cannot hand in someone else's already-qualified session
+        id and read it verbatim. Single-tenant mode is untouched: the raw
+        name they gave, exactly as before.
+        """
+        prefix = _tenant_prefix(principal)
+        if not session:
+            return None
+        return f"{prefix}{session}" if prefix else session
+
     @app.get("/dashboard/memory")
     async def dashboard_memory(limit: int = 100, offset: int = 0,
                             session: str = "",
-                            _: str = Depends(require_principal)) -> dict:
-        """What the assistant remembers, newest first."""
+                            principal: str = Depends(require_principal)) -> dict:
+        """What the assistant remembers, newest first — the caller's own."""
         memory = _memory_or_503()
-        records = await memory.browse(session_id=session or None,
+        session_id = _own_session_id(principal, session)
+        prefix = None if session_id else _tenant_prefix(principal)
+        records = await memory.browse(session_id=session_id,
+                                    session_prefix=prefix,
                                     limit=limit, offset=offset)
         return {
             "can_browse": memory.can_browse(),
-            "stats": memory.stats(),
+            "stats": memory.stats(session_prefix=_tenant_prefix(principal)),
             "items": [{"id": r.record_id, "content": r.content,
                     "kind": r.kind, "session": r.session_id,
                     "timestamp": r.timestamp.isoformat()} for r in records],
         }
 
     @app.get("/dashboard/memory/search")
-    async def dashboard_memory_search(q: str, limit: int = 20,
-                                    _: str = Depends(require_principal)) -> dict:
-        """Search memories the way the assistant itself recalls them."""
+    async def dashboard_memory_search(
+            q: str, limit: int = 20,
+            principal: str = Depends(require_principal)) -> dict:
+        """Search memories the way the assistant itself recalls them.
+
+        Scoped to the caller's own sessions — recall used to search
+        (``session_id=None``) *every* account's memory on a shared server.
+        """
         memory = _memory_or_503()
         if not q.strip():
             return {"items": []}
-        records = await memory.recall(q, session_id=None, limit=limit)
+        records = await memory.recall(q, session_id=None,
+                                    session_prefix=_tenant_prefix(principal),
+                                    limit=limit)
         return {"items": [{"id": r.record_id, "content": r.content,
                         "kind": r.kind, "session": r.session_id,
                         "score": round(r.score, 3),
@@ -808,11 +888,19 @@ def create_app(engine: JarvisEngine | None = None,
                         for r in records]}
 
     @app.delete("/dashboard/memory/{record_id}")
-    async def dashboard_memory_delete(record_id: int,
-                                    _: str = Depends(require_principal)) -> dict:
-        """Forget one specific thing."""
+    async def dashboard_memory_delete(
+            record_id: int,
+            principal: str = Depends(require_principal)) -> dict:
+        """Forget one specific thing — only if it is the caller's own.
+
+        A record outside the caller's own sessions is reported the same way
+        as one that never existed (404), never a permission error: telling
+        the two apart would confirm that some other tenant's record id is
+        real.
+        """
         memory = _memory_or_503()
-        removed = await memory.delete_memory(record_id)
+        removed = await memory.delete_memory(
+            record_id, session_prefix=_tenant_prefix(principal))
         if not removed:
             raise HTTPException(status_code=404, detail="No such memory.")
         return {"ok": True, "id": record_id}
@@ -822,12 +910,21 @@ def create_app(engine: JarvisEngine | None = None,
         everything: bool = False
 
     @app.post("/dashboard/memory/forget")
-    async def dashboard_memory_forget(body: _ForgetIn,
-                                    _: str = Depends(require_principal)) -> dict:
-        """Clear a session's memory, or all of it."""
+    async def dashboard_memory_forget(
+            body: _ForgetIn,
+            principal: str = Depends(require_principal)) -> dict:
+        """Clear a session's memory, or all of it — all of *theirs*, on a
+        server that has more than one tenant."""
         memory = _memory_or_503()
-        await memory.forget(None if body.everything else (body.session or "default"))
-        return {"ok": True, "stats": memory.stats()}
+        prefix = _tenant_prefix(principal)
+        if body.everything:
+            if prefix:
+                await memory.forget_by_prefix(prefix)
+            else:
+                await memory.forget(None)
+        else:
+            await memory.forget(_own_session_id(principal, body.session or "default"))
+        return {"ok": True, "stats": memory.stats(session_prefix=prefix)}
 
     # -- web search ----------------------------------------------------------
 

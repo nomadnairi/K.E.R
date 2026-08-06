@@ -23,6 +23,22 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def like_prefix_pattern(prefix: str) -> str:
+    """Build a SQL ``LIKE`` pattern that matches ``prefix`` literally, then
+    anything — pair with ``ESCAPE '\\'`` in the query.
+
+    Session ids are namespaced as ``f"{principal}::{session_id}"`` (see
+    ``jarvis.api.app._scoped``), and a principal is built from an account's
+    own username — not from a fixed character set. Without escaping, a
+    username containing ``%`` or ``_`` would silently widen the match to
+    sessions that are not actually the caller's own, which is exactly the
+    kind of one-account-sees-another's-data bug this pattern exists to
+    prevent.
+    """
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"{escaped}%"
+
+
 @dataclass
 class MemoryRecord:
     """A single stored memory item."""
@@ -85,20 +101,31 @@ class BaseMemoryStore(ABC):
 
     @abstractmethod
     def recall(self, query: str, *, session_id: str | None = "default",
+            session_prefix: str | None = None,
             limit: int = 5) -> list[MemoryRecord]:
         """Return records relevant to ``query``, most relevant first.
 
-        ``session_id=None`` searches across all sessions.
+        ``session_id=None`` searches across all sessions. ``session_prefix``,
+        when given, takes precedence and restricts the search to sessions
+        whose id starts with it — how the API scopes a search to one
+        account's own sessions on a server that serves several.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def forget(self, session_id: str | None = "default") -> None:
-        """Delete stored memories (``None`` clears everything)."""
+    def forget(self, session_id: str | None = "default", *,
+            session_prefix: str | None = None) -> None:
+        """Delete stored memories (``None`` clears everything).
+
+        ``session_prefix``, when given, takes precedence over ``session_id``
+        and clears every session under that prefix — "everything **I** own",
+        not literally everything on a shared server.
+        """
         raise NotImplementedError
 
-    def count(self, session_id: str | None = None) -> int:  # pragma: no cover - default
-        """Number of stored records (optionally scoped to a session)."""
+    def count(self, session_id: str | None = None, *,
+            session_prefix: str | None = None) -> int:  # pragma: no cover - default
+        """Number of stored records (optionally scoped to a session/prefix)."""
         return 0
 
     # -- browsing -----------------------------------------------------------
@@ -106,7 +133,8 @@ class BaseMemoryStore(ABC):
     # their assistant remembers is a different question, so it gets its own
     # pair: list newest-first, and delete one item.
 
-    def browse(self, *, session_id: str | None = None, limit: int = 100,
+    def browse(self, *, session_id: str | None = None,
+            session_prefix: str | None = None, limit: int = 100,
             offset: int = 0) -> list[MemoryRecord]:
         """Stored memories, newest first.
 
@@ -119,6 +147,11 @@ class BaseMemoryStore(ABC):
         """Whether :meth:`browse` and :meth:`delete` actually do something."""
         return False
 
-    def delete(self, record_id: int) -> bool:
-        """Remove one memory by id; ``False`` if it was not there."""
+    def delete(self, record_id: int, *, session_prefix: str | None = None) -> bool:
+        """Remove one memory by id; ``False`` if it was not there.
+
+        With ``session_prefix`` set, a record outside that prefix is treated
+        as not found rather than deleted — a caller cannot use this to touch
+        another tenant's memory by guessing an id.
+        """
         return False

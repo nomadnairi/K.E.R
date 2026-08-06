@@ -51,19 +51,52 @@ class ChromaVectorStore(BaseMemoryStore):
             }],
         )
 
+    def _ids_matching_prefix(self, prefix: str) -> list[str]:
+        """Ids of every record whose session belongs to ``prefix``.
+
+        Chroma's ``where`` metadata filter has no prefix/contains operator
+        (only equality, comparisons and set membership), so a tenant-scoped
+        query can't be expressed in one call the way the SQLite store's
+        ``LIKE`` can. This fetches ids + metadata (not the vectors) and
+        filters in Python instead — fine at the scale this backend targets,
+        and correctness (never handing back another tenant's memory) matters
+        more here than the extra round trip.
+        """
+        got = self._collection.get(include=["metadatas"])
+        ids = got.get("ids") or []
+        metas = got.get("metadatas") or []
+        return [i for i, m in zip(ids, metas)
+                if str((m or {}).get("session_id", "")).startswith(prefix)]
+
     def recall(self, query: str, *, session_id: str | None = "default",
+            session_prefix: str | None = None,
             limit: int = 5) -> list[MemoryRecord]:
-        where = {"session_id": session_id} if session_id is not None else None
+        if session_prefix is not None:
+            allowed = set(self._ids_matching_prefix(session_prefix))
+            if not allowed:
+                return []
+            where = None
+            # Over-fetch: some of Chroma's top matches may fall outside the
+            # tenant's own sessions and get filtered out below, so ask for
+            # more than `limit` up front rather than under-return.
+            n_results = max(limit * 5, limit, len(allowed))
+        else:
+            where = {"session_id": session_id} if session_id is not None else None
+            allowed = None
+            n_results = limit
         result = self._collection.query(
             query_embeddings=[self.embedder.embed(query)],
-            n_results=limit,
+            n_results=n_results,
             where=where,
         )
+        ids = (result.get("ids") or [[]])[0]
         docs = (result.get("documents") or [[]])[0]
         metas = (result.get("metadatas") or [[]])[0]
         distances = (result.get("distances") or [[]])[0]
         records: list[MemoryRecord] = []
-        for doc, meta, dist in zip(docs, metas, distances):
+        for rid, doc, meta, dist in zip(ids, docs, metas, distances):
+            if allowed is not None and rid not in allowed:
+                continue
             records.append(
                 MemoryRecord(
                     content=doc,
@@ -72,10 +105,17 @@ class ChromaVectorStore(BaseMemoryStore):
                     score=1.0 - float(dist),  # distance -> similarity
                 )
             )
+            if len(records) >= limit:
+                break
         return records
 
-    def forget(self, session_id: str | None = "default") -> None:
-        if session_id is None:
+    def forget(self, session_id: str | None = "default", *,
+            session_prefix: str | None = None) -> None:
+        if session_prefix is not None:
+            ids = self._ids_matching_prefix(session_prefix)
+            if ids:
+                self._collection.delete(ids=ids)
+        elif session_id is None:
             # Recreate the collection to wipe everything.
             name = self._collection.name
             self._client.delete_collection(name)
@@ -83,8 +123,11 @@ class ChromaVectorStore(BaseMemoryStore):
         else:
             self._collection.delete(where={"session_id": session_id})
 
-    def count(self, session_id: str | None = None) -> int:
+    def count(self, session_id: str | None = None, *,
+            session_prefix: str | None = None) -> int:
         try:
+            if session_prefix is not None:
+                return len(self._ids_matching_prefix(session_prefix))
             return self._collection.count()
         except Exception:  # noqa: BLE001 - backend-specific
             return 0
