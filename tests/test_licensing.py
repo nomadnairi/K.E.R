@@ -94,6 +94,141 @@ def test_expired_token_is_invalid(svc: LicenseService):
     assert svc.purge_expired_tokens() == 1
 
 
+# -- device metadata / sessions (Этап 2 / Фаза A2) ---------------------------
+#
+# tokens previously recorded nothing about the client that requested one —
+# no device id, name, platform, or client type, and no "last seen" — so the
+# server could never answer "what's logged in on this account right now".
+# See jarvis.licensing.service.LicenseService.list_sessions/revoke_session.
+
+def test_issue_token_without_device_info_is_unchanged(svc: LicenseService):
+    # Every pre-existing call site (password login, Telegram redemption) —
+    # must keep working exactly as before.
+    acc = svc.create_account("clint", "arrow")
+    token = svc.issue_token(acc.id)
+    assert svc.validate_token(token).id == acc.id
+    sessions = svc.list_sessions(acc.id)
+    assert len(sessions) == 1
+    assert sessions[0]["device_id"] is None
+    assert sessions[0]["device_name"] == ""
+    assert sessions[0]["platform"] == ""
+
+
+def test_issue_token_records_device_metadata(svc: LicenseService):
+    acc = svc.create_account("wanda", "hex")
+    svc.issue_token(acc.id, device_id="desktop-abc123", device_name="Wanda's PC",
+                    platform="windows", client_type="desktop")
+    sessions = svc.list_sessions(acc.id)
+    assert len(sessions) == 1
+    row = sessions[0]
+    assert row["device_id"] == "desktop-abc123"
+    assert row["device_name"] == "Wanda's PC"
+    assert row["platform"] == "windows"
+    assert row["client_type"] == "desktop"
+    assert row["created_at"] is not None
+
+
+def test_validate_token_stamps_last_seen(svc: LicenseService):
+    acc = svc.create_account("sam", "falcon")
+    token = svc.issue_token(acc.id)
+    assert svc.list_sessions(acc.id)[0]["last_seen_at"] is None
+    svc.validate_token(token)
+    assert svc.list_sessions(acc.id)[0]["last_seen_at"] is not None
+
+
+def test_list_sessions_only_shows_this_accounts_tokens(svc: LicenseService):
+    a = svc.create_account("peter", "spidey")
+    b = svc.create_account("miles", "spidey2")
+    svc.issue_token(a.id, device_name="Peter's phone")
+    svc.issue_token(b.id, device_name="Miles's phone")
+    a_sessions = svc.list_sessions(a.id)
+    assert len(a_sessions) == 1
+    assert a_sessions[0]["device_name"] == "Peter's phone"
+
+
+def test_list_sessions_excludes_expired(svc: LicenseService):
+    acc = svc.create_account("bucky", "winter")
+    svc.issue_token(acc.id)
+    svc._conn.execute(
+        "UPDATE tokens SET expires_at = ? WHERE user_id = ?",
+        (time.time() - 1, acc.id))
+    svc._conn.commit()
+    assert svc.list_sessions(acc.id) == []
+
+
+def test_revoke_session_ends_that_token_only(svc: LicenseService):
+    acc = svc.create_account("carol", "binary")
+    tok1 = svc.issue_token(acc.id, device_name="Phone")
+    tok2 = svc.issue_token(acc.id, device_name="Laptop")
+    sessions = {s["device_name"]: s["id"] for s in svc.list_sessions(acc.id)}
+
+    assert svc.revoke_session(acc.id, sessions["Phone"]) is True
+
+    assert svc.validate_token(tok1) is None
+    assert svc.validate_token(tok2).id == acc.id
+    remaining = svc.list_sessions(acc.id)
+    assert len(remaining) == 1 and remaining[0]["device_name"] == "Laptop"
+
+
+def test_revoke_session_cannot_touch_another_accounts_token():
+    """One account can never end another's session by guessing/reusing an id
+    — the exact class of bug this session revamp exists to prevent."""
+    svc = LicenseService(":memory:", token_ttl_hours=1)
+    try:
+        victim = svc.create_account("victim", "password1")
+        attacker = svc.create_account("attacker", "password2")
+        svc.issue_token(victim.id, device_name="Victim's phone")
+        victim_session_id = svc.list_sessions(victim.id)[0]["id"]
+
+        assert svc.revoke_session(attacker.id, victim_session_id) is False
+        # Victim's session is untouched.
+        assert len(svc.list_sessions(victim.id)) == 1
+    finally:
+        svc.close()
+
+
+def test_revoke_session_unknown_id_returns_false(svc: LicenseService):
+    acc = svc.create_account("hope", "wasp")
+    assert svc.revoke_session(acc.id, "not-a-real-token-hash") is False
+
+
+def test_old_schema_tokens_table_migrates_cleanly(tmp_path):
+    """A tokens table created before device columns existed must not crash
+    startup — same guarantee already given to accounts/telegram_user_id."""
+    import sqlite3
+
+    db_path = str(tmp_path / "auth.db")
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at REAL NOT NULL
+        );
+        CREATE TABLE tokens (
+            token_hash TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at REAL NOT NULL,
+            expires_at REAL NOT NULL
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    svc = LicenseService(db_path, token_ttl_hours=1)
+    try:
+        acc = svc.create_account("legacy", "oldpw")
+        token = svc.issue_token(acc.id, device_name="New client")
+        assert svc.validate_token(token).id == acc.id
+        assert svc.list_sessions(acc.id)[0]["device_name"] == "New client"
+    finally:
+        svc.close()
+
+
 def test_license_expiry_and_revoke(svc: LicenseService):
     acc = svc.create_account("clint", "arrow")
     key = svc.issue_license(acc.id, valid_days=30)

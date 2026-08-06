@@ -170,6 +170,7 @@ class LicenseService:
                 created_at REAL NOT NULL,
                 expires_at REAL NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS idx_tokens_user ON tokens(user_id);
             CREATE TABLE IF NOT EXISTS pairings (
                 code TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -204,6 +205,22 @@ class LicenseService:
             self._conn.execute(
                 "ALTER TABLE accounts ADD COLUMN telegram_verified "
                 "INTEGER NOT NULL DEFAULT 0")
+        # Same reasoning as above, for `tokens`: a database created before
+        # this device-metadata migration existed has none of these columns.
+        # All are nullable/defaulted, so existing rows (issued before this
+        # migration) simply read back as "no device metadata" — never an
+        # error, and never a fabricated identity for an old token.
+        token_columns = {row["name"] for row in
+                        self._conn.execute("PRAGMA table_info(tokens)")}
+        for name, ddl in (
+            ("device_id", "TEXT"),
+            ("device_name", "TEXT NOT NULL DEFAULT ''"),
+            ("platform", "TEXT NOT NULL DEFAULT ''"),
+            ("client_type", "TEXT NOT NULL DEFAULT ''"),
+            ("last_seen_at", "REAL"),
+        ):
+            if name not in token_columns:
+                self._conn.execute(f"ALTER TABLE tokens ADD COLUMN {name} {ddl}")
         self._conn.commit()
 
     def close(self) -> None:
@@ -375,14 +392,28 @@ class LicenseService:
 
     # -- login tokens ---------------------------------------------------------
 
-    def issue_token(self, user_id: int) -> str:
-        """Create and return a plaintext bearer token (stored hashed)."""
+    def issue_token(self, user_id: int, *, device_id: str | None = None,
+                    device_name: str = "", platform: str = "",
+                    client_type: str = "") -> str:
+        """Create and return a plaintext bearer token (stored hashed).
+
+        The device fields are optional and purely descriptive — a caller that
+        doesn't pass them (every pre-existing call site) gets exactly the old
+        row shape (empty strings / NULL device_id), so this is backward
+        compatible. They exist so an account can later see *what* is logged
+        in (Device Manager, :meth:`list_sessions`), not just *that* something
+        is — before this, ``tokens`` recorded nothing about the client that
+        requested it at all.
+        """
         token = secrets.token_urlsafe(32)
         now = time.time()
         self._conn.execute(
-            "INSERT INTO tokens (token_hash, user_id, created_at, expires_at) "
-            "VALUES (?, ?, ?, ?)",
-            (_token_hash(token), user_id, now, now + self._token_ttl),
+            "INSERT INTO tokens (token_hash, user_id, created_at, expires_at, "
+            "device_id, device_name, platform, client_type) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (_token_hash(token), user_id, now, now + self._token_ttl,
+            device_id, device_name.strip()[:80], platform.strip()[:40],
+            client_type.strip()[:40]),
         )
         self._conn.commit()
         return token
@@ -391,18 +422,73 @@ class LicenseService:
         """Return the account for a valid, unexpired token, else ``None``."""
         if not token:
             return None
+        token_hash = _token_hash(token)
         row = self._conn.execute(
             "SELECT a.* FROM tokens t JOIN accounts a ON a.id = t.user_id "
             "WHERE t.token_hash = ? AND t.expires_at > ? AND a.active = 1",
-            (_token_hash(token), time.time()),
+            (token_hash, time.time()),
         ).fetchone()
-        return self._account_from_row(row) if row else None
+        if row is None:
+            return None
+        # Best-effort last-seen stamp, same pattern as validate_api_key — a
+        # write failure must never deny an otherwise-valid token.
+        try:
+            self._conn.execute(
+                "UPDATE tokens SET last_seen_at = ? WHERE token_hash = ?",
+                (time.time(), token_hash),
+            )
+            self._conn.commit()
+        except sqlite3.Error:  # pragma: no cover - stamping is a nicety
+            pass
+        return self._account_from_row(row)
 
     def revoke_token(self, token: str) -> None:
         self._conn.execute(
             "DELETE FROM tokens WHERE token_hash = ?", (_token_hash(token),)
         )
         self._conn.commit()
+
+    def list_sessions(self, user_id: int) -> list[dict]:
+        """Every live (unexpired) token for this account — Device Manager data.
+
+        ``id`` is the token's own hash: opaque, not reversible to the bearer
+        token itself (it IS the hash already), safe to hand back to the
+        owning account for use with :meth:`revoke_session`.
+        """
+        rows = self._conn.execute(
+            "SELECT token_hash, device_id, device_name, platform, client_type, "
+            "created_at, last_seen_at, expires_at FROM tokens "
+            "WHERE user_id = ? AND expires_at > ? ORDER BY created_at DESC",
+            (user_id, time.time()),
+        ).fetchall()
+        return [
+            {
+                "id": r["token_hash"],
+                "device_id": r["device_id"],
+                "device_name": r["device_name"],
+                "platform": r["platform"],
+                "client_type": r["client_type"],
+                "created_at": r["created_at"],
+                "last_seen_at": r["last_seen_at"],
+                "expires_at": r["expires_at"],
+            }
+            for r in rows
+        ]
+
+    def revoke_session(self, user_id: int, token_id: str) -> bool:
+        """Revoke one session (by :meth:`list_sessions`' ``id``), but only if
+        it belongs to this account — the same ownership check
+        :meth:`revoke_api_key` uses, so one account can never end another's
+        session by guessing or reusing an id."""
+        cur = self._conn.execute(
+            "DELETE FROM tokens WHERE token_hash = ? AND user_id = ?",
+            (token_id, user_id),
+        )
+        self._conn.commit()
+        if cur.rowcount > 0:
+            audit.audit_event(audit.TOKEN_REVOKED, principal=f"id:{user_id}")
+            return True
+        return False
 
     def purge_expired_tokens(self) -> int:
         cur = self._conn.execute(
