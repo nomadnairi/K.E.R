@@ -1,5 +1,5 @@
 import { motion, useReducedMotion } from 'framer-motion';
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { Outlet, Route, Routes, useLocation } from 'react-router-dom';
 
 import { Footer } from './components/Footer';
@@ -19,16 +19,16 @@ import { SecurityPage } from './pages/SecurityPage';
 function ScrollToTop() {
   const { pathname } = useLocation();
 
-  useEffect(() => {
+  // Layout effect, not a plain one: this has to land before the browser paints
+  // the new route, or the page is briefly visible at the old scroll offset.
+  useLayoutEffect(() => {
     // `scroll-behavior: smooth` is set globally so in-page anchors glide. That
     // same rule turns this jump into a long crawl back up the page the user
-    // has just left — the single jankiest thing about navigating the site.
-    // Suspend it for this one call and put it back.
-    const root = document.documentElement;
-    const previous = root.style.scrollBehavior;
-    root.style.scrollBehavior = 'auto';
-    window.scrollTo(0, 0);
-    root.style.scrollBehavior = previous;
+    // has just left — the jankiest thing about navigating the site. `instant`
+    // is the documented override for exactly this case; swapping the CSS
+    // property around the call is not enough, because the scroll is still in
+    // flight when the old value goes back on.
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, [pathname]);
 
   return null;
