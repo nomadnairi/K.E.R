@@ -162,6 +162,15 @@ class Settings(BaseSettings):
     tts_voice: str = "alloy"
     #: Local Whisper model size (tiny | base | small | medium | large).
     local_whisper_model: str = "base"
+    #: Hard ceiling on an uploaded voice message, enforced by the API itself —
+    #: never rely on a reverse proxy alone; a bare ``python -m jarvis.api``
+    #: has no proxy in front of it at all. 15 MB comfortably covers a real
+    #: voice note (tens of minutes of compressed opus/webm).
+    voice_stt_max_bytes: int = Field(default=15 * 1024 * 1024, gt=0)
+    #: Hard ceiling on TTS input length, in characters. 4000 mirrors what
+    #: OpenAI's own TTS endpoint accepts — a request past that would fail
+    #: upstream anyway, just after paying for the round trip first.
+    voice_tts_max_chars: int = Field(default=4000, gt=0)
     #: Whether the bot also replies with a spoken (TTS) voice/audio message.
     voice_replies: bool = True
 

@@ -208,14 +208,15 @@ class _FakeVoice:
         return "ogg"
 
 
-def _voice_app(monkeypatch, voice=None):
+def _voice_app(monkeypatch, voice=None, **overrides):
     """Build an app whose voice service is the injected fake."""
     from jarvis.voice import VoiceService
     monkeypatch.setattr(VoiceService, "from_settings",
                         classmethod(lambda cls, s: voice), raising=True)
     settings = Settings(anthropic_api_key="k", log_file="", memory_enabled=False,
                         integrations_enabled=False, goals_enabled=False,
-                        rate_limit_enabled=False, api_key="", voice_enabled=True)
+                        rate_limit_enabled=False, api_key="", voice_enabled=True,
+                        **overrides)
     engine = JarvisEngine(container=ServiceContainer(
         settings, llm_client=LLMClient(primary=FakeProvider())))
     return create_app(engine=engine, settings=settings)
@@ -259,6 +260,110 @@ def test_voice_endpoints_503_when_unconfigured(monkeypatch):
             assert c.post("/voice/stt",
                           files={"file": ("v.webm", b"x", "audio/webm")}
                           ).status_code == 503
+
+
+# -- size limits enforced by the app itself, not just a reverse proxy --------
+#
+# Before this, `await file.read()` pulled the whole upload into one Python
+# object regardless of size, and SpeakIn.text had no length check at all — a
+# bare `python -m jarvis.api`, with no nginx in front, had no limit whatsoever.
+
+
+class _ChunkedReader:
+    """Hands out fixed-size chunks on demand, up to ``total`` bytes.
+
+    Never actually holds ``total`` bytes at once — if the code under test
+    called a bare, unbounded ``.read()`` instead of reading chunk by chunk,
+    this would still return the right bytes (nothing here depends on the
+    caller behaving), so what actually proves the capped behaviour is
+    ``max_seen`` below, not this class needing to fail on misuse.
+    """
+
+    def __init__(self, total: int, chunk: int = 8) -> None:
+        self._remaining = total
+        self._chunk = chunk
+        self.max_seen = 0
+        self._served = 0
+
+    async def read(self, size: int = -1) -> bytes:
+        n = min(self._chunk, self._remaining)
+        self._remaining -= n
+        self._served += n
+        self.max_seen = max(self.max_seen, self._served)
+        return b"x" * n
+
+
+def test_read_capped_stops_at_the_boundary_without_buffering_the_whole_stream():
+    """Direct unit test of the reader FastAPI's voice_stt route uses — the
+    part of this fix that actually matters: memory used is bounded by the
+    cap plus one chunk, not by however much the client sends."""
+    import asyncio
+
+    from jarvis.api.app import _read_capped
+
+    reader = _ChunkedReader(total=10_000_000, chunk=64)  # ~10 MB, 64 B at a time
+    with pytest.raises(ValueError):
+        asyncio.run(_read_capped(reader, max_bytes=1000))
+    # Stopped soon after crossing 1000 bytes — nowhere near the 10 MB total.
+    assert reader.max_seen < 1000 + 64
+
+
+def test_read_capped_returns_everything_when_under_the_limit():
+    import asyncio
+
+    from jarvis.api.app import _read_capped
+
+    reader = _ChunkedReader(total=500, chunk=64)
+    result = asyncio.run(_read_capped(reader, max_bytes=1000))
+    assert result == b"x" * 500
+
+
+def test_read_capped_accepts_exactly_the_limit():
+    import asyncio
+
+    from jarvis.api.app import _read_capped
+
+    reader = _ChunkedReader(total=1000, chunk=100)
+    result = asyncio.run(_read_capped(reader, max_bytes=1000))
+    assert len(result) == 1000
+
+
+def test_oversized_voice_upload_is_rejected_with_413(monkeypatch):
+    pytest.importorskip("multipart")
+    app = _voice_app(monkeypatch, _FakeVoice(), voice_stt_max_bytes=100)
+    with TestClient(app) as c:
+        r = c.post("/voice/stt",
+                   files={"file": ("v.webm", b"x" * 500, "audio/webm")})
+        assert r.status_code == 413
+        assert "MB" in r.json()["detail"]
+
+
+def test_voice_upload_at_exactly_the_limit_is_accepted(monkeypatch):
+    pytest.importorskip("multipart")
+    # The cap applies to the file's own content, not the whole multipart body
+    # (boundaries/headers add a little overhead) — use a large enough file
+    # that this test's own encoding overhead can't be mistaken for the bug.
+    size = 100_000
+    app = _voice_app(monkeypatch, _FakeVoice(), voice_stt_max_bytes=size)
+    with TestClient(app) as c:
+        r = c.post("/voice/stt",
+                   files={"file": ("v.webm", b"x" * size, "audio/webm")})
+        assert r.status_code == 200
+        assert r.json() == {"text": f"heard {size} bytes", "language": "ru"}
+
+
+def test_oversized_tts_text_is_rejected_with_413(monkeypatch):
+    app = _voice_app(monkeypatch, _FakeVoice(), voice_tts_max_chars=10)
+    with TestClient(app) as c:
+        r = c.post("/voice/tts", json={"text": "x" * 11})
+        assert r.status_code == 413
+
+
+def test_tts_text_at_exactly_the_limit_is_accepted(monkeypatch):
+    app = _voice_app(monkeypatch, _FakeVoice(), voice_tts_max_chars=10)
+    with TestClient(app) as c:
+        r = c.post("/voice/tts", json={"text": "x" * 10})
+        assert r.status_code == 200
 
 
 def test_state_exposes_voice_and_real_python(monkeypatch):

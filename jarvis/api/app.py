@@ -48,6 +48,39 @@ class ChatOut(BaseModel):
     session_id: str
 
 
+#: Chunk size for the capped upload reader below.
+_STT_CHUNK_BYTES = 65_536
+
+
+async def _read_capped(reader, max_bytes: int, *,
+                        chunk_size: int = _STT_CHUNK_BYTES) -> bytes:
+    """Read from ``reader`` (anything with an async ``read(size)``, e.g. a
+    FastAPI ``UploadFile``) in chunks, raising ``ValueError`` the moment the
+    running total exceeds ``max_bytes``.
+
+    Never a bare, unbounded ``read()`` — a client can claim any
+    ``Content-Length`` header (or none at all, with chunked transfer
+    encoding), so the only limit that actually holds is the one enforced
+    while reading, not one assumed from a header a caller controls. Reading
+    stops the instant the cap is crossed, so at most one chunk past the limit
+    is ever held in memory — never the full size of an oversized upload.
+
+    Free of any FastAPI import on purpose, so it needs no HTTP machinery to
+    unit-test.
+    """
+    total = 0
+    parts: list[bytes] = []
+    while True:
+        chunk = await reader.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise ValueError(f"stream exceeds {max_bytes} bytes")
+        parts.append(chunk)
+    return b"".join(parts)
+
+
 class SpeakIn(BaseModel):
     """A text-to-speech request."""
 
@@ -74,6 +107,7 @@ def create_app(engine: JarvisEngine | None = None,
             WebSocket,
             WebSocketDisconnect,
         )
+        from fastapi import Request as HttpRequest
     except ImportError as exc:  # pragma: no cover - optional dependency
         raise RuntimeError(
             "The API needs 'fastapi' and 'uvicorn'. Install with: "
@@ -327,13 +361,34 @@ def create_app(engine: JarvisEngine | None = None,
 
     if _multipart:
         @app.post("/voice/stt")
-        async def voice_stt(file: UploadFile = File(...),  # noqa: B008 - FastAPI dep
+        async def voice_stt(request: HttpRequest,
+                            file: UploadFile = File(...),  # noqa: B008 - FastAPI dep
                             _: str = Depends(require_principal)) -> dict:
             """Transcribe uploaded audio to text."""
             svc = _voice()
             if svc is None or not svc.stt_available():
                 raise HTTPException(503, "Speech-to-text is not configured.")
-            audio = await file.read()
+            cap = settings.voice_stt_max_bytes
+            too_big = HTTPException(
+                status_code=413,
+                detail=f"Audio upload exceeds the {cap // (1024 * 1024)} MB limit.")
+            # Fast path: a clearly, honestly oversized request is refused
+            # before reading a single byte of the body. Content-Length here
+            # is the *whole* multipart body (boundaries, per-part headers,
+            # filename) — a few hundred bytes more than the file content the
+            # cap actually governs — so only reject when it overshoots by
+            # more than any realistic framing overhead could explain; the
+            # exact, authoritative check is the capped read below, which
+            # counts the file's own bytes and needs no such margin. Neither
+            # check trusts the header alone (a client can omit or lie about
+            # it with chunked transfer encoding) — that's what the read does.
+            declared = request.headers.get("content-length")
+            if declared and declared.isdigit() and int(declared) > cap + 65_536:
+                raise too_big
+            try:
+                audio = await _read_capped(file, cap)
+            except ValueError:
+                raise too_big from None
             if not audio:
                 raise HTTPException(400, "Empty audio upload.")
             result = await svc.transcribe(audio, file.filename or "voice.webm")
@@ -354,9 +409,15 @@ def create_app(engine: JarvisEngine | None = None,
         svc = _voice()
         if svc is None or not svc.tts_available():
             raise HTTPException(503, "Text-to-speech is not configured.")
-        if not body.text.strip():
+        text = body.text.strip()
+        if not text:
             raise HTTPException(400, "Nothing to speak.")
-        audio = await svc.synthesize(body.text, body.language)
+        if len(text) > settings.voice_tts_max_chars:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Text exceeds the {settings.voice_tts_max_chars} "
+                        f"character limit.")
+        audio = await svc.synthesize(text, body.language)
         ext = svc.tts_ext()
         media = {"ogg": "audio/ogg", "mp3": "audio/mpeg",
                 "wav": "audio/wav"}.get(ext, "application/octet-stream")
