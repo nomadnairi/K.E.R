@@ -440,8 +440,12 @@ def create_app(engine: JarvisEngine | None = None,
             while True:
                 msg = await websocket.receive_json()
                 if msg.get("type") == "tool_result":
+                    # `principal` is this socket's own authenticated identity
+                    # (resolved once above, at connection time) — never taken
+                    # from the message — so this connection can only ever
+                    # resolve a call that was issued to it.
                     engine.container.devices.resolve(
-                        msg.get("call_id", ""),
+                        principal, msg.get("call_id", ""),
                         content=str(msg.get("content", "")),
                         metadata=msg.get("metadata") or {},
                     )
@@ -522,6 +526,16 @@ def create_app(engine: JarvisEngine | None = None,
         """
         return f"{principal}::" if service is not None else None
 
+    def _confirm_owner(principal: str) -> str | None:
+        """Whose confirmation questions ``principal`` may see or answer.
+
+        Same single-tenant passthrough as :func:`_tenant_prefix` (``None``
+        when accounts are off — there is only one legitimate caller and
+        nothing to scope against), without the trailing ``"::"`` since this
+        compares against a whole owner name, not a session-id prefix.
+        """
+        return principal if service is not None else None
+
     @app.get("/dashboard/sessions")
     async def dashboard_sessions(
             principal: str = Depends(require_principal)) -> dict:
@@ -539,7 +553,7 @@ def create_app(engine: JarvisEngine | None = None,
         """The engine's confirmation broker, when it has one."""
         return getattr(engine.security, "confirmer", None)
 
-    async def _state_payload() -> dict:
+    async def _state_payload(principal: str) -> dict:
         from jarvis.core.capabilities import CapabilityManager
         cap_state = {"enabled": "on", "restricted": "res", "disabled": "off"}
         caps = [[c.label, cap_state.get(c.state.value, "off")]
@@ -573,13 +587,15 @@ def create_app(engine: JarvisEngine | None = None,
             # Questions the assistant is waiting on right now. Carried in the
             # state payload so the interface learns about them through the
             # channel it already listens to.
-            "confirmations": _broker().pending() if _broker() else [],
+            "confirmations": _broker().pending(owner=_confirm_owner(principal))
+                            if _broker() else [],
             "weather": await _weather(),
         }
 
     @app.get("/dashboard/state")
-    async def dashboard_state(_: str = Depends(require_principal)) -> dict:
-        return await _state_payload()
+    async def dashboard_state(
+            principal: str = Depends(require_principal)) -> dict:
+        return await _state_payload(principal)
 
     @app.websocket("/dashboard/ws")
     async def dashboard_ws(websocket: WebSocket) -> None:
@@ -592,11 +608,12 @@ def create_app(engine: JarvisEngine | None = None,
         await websocket.accept()
         try:
             while True:
-                await websocket.send_json(await _state_payload())
+                await websocket.send_json(await _state_payload(principal))
                 # A question the assistant is blocked on must reach the screen
                 # quickly; the rest of the state can wait five seconds.
                 broker = _broker()
-                waiting = bool(broker and broker.pending())
+                waiting = bool(
+                    broker and broker.pending(owner=_confirm_owner(principal)))
                 await _a.sleep(0.7 if waiting else 5)
         except WebSocketDisconnect:
             return
@@ -814,23 +831,27 @@ def create_app(engine: JarvisEngine | None = None,
 
     @app.get("/dashboard/confirmations")
     async def dashboard_confirmations(
-            _: str = Depends(require_principal)) -> dict:
-        """Anything the assistant is currently waiting on the user for."""
+            principal: str = Depends(require_principal)) -> dict:
+        """Anything the assistant is currently waiting on *this caller* for."""
         broker = _broker()
-        return {"pending": broker.pending() if broker else []}
+        return {"pending": broker.pending(owner=_confirm_owner(principal))
+                if broker else []}
 
     @app.post("/dashboard/confirm")
-    async def dashboard_confirm(body: _ConfirmIn,
-                                _: str = Depends(require_principal)) -> dict:
-        """Answer one permission question."""
+    async def dashboard_confirm(
+            body: _ConfirmIn,
+            principal: str = Depends(require_principal)) -> dict:
+        """Answer one of *this caller's own* permission questions."""
         broker = _broker()
         if broker is None:
             raise HTTPException(status_code=503,
                                 detail="This engine does not ask for "
                                         "confirmation.")
-        answered = broker.resolve(body.id, body.allow)
+        answered = broker.resolve(body.id, body.allow,
+                                owner=_confirm_owner(principal))
         if not answered:
-            # Already answered, or it timed out while the user was deciding.
+            # Already answered, timed out, or (same response either way)
+            # belongs to someone else — this never confirms which.
             raise HTTPException(status_code=404,
                                 detail="That request is no longer waiting.")
         return {"ok": True, "id": body.id, "allowed": body.allow}

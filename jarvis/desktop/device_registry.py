@@ -46,7 +46,13 @@ class DeviceRegistry:
     def __init__(self, *, timeout: float = 30.0) -> None:
         self._timeout = timeout
         self._connections: dict[str, _Connection] = {}
-        self._pending: dict[str, asyncio.Future] = {}
+        # Keyed by (principal, call_id), not call_id alone: call_id is a short
+        # sequential counter shared by the whole process ("dc1", "dc2", ...),
+        # so without the principal in the key, any connected device — any
+        # signed-in account — could resolve (or overwrite the answer to)
+        # another account's in-flight tool call just by sending back a
+        # guessed or reused id.
+        self._pending: dict[tuple[str, str], asyncio.Future] = {}
 
     # -- connection lifecycle ------------------------------------------------
 
@@ -92,8 +98,9 @@ class DeviceRegistry:
                 text="No PC is connected right now — open the app on the "
                     "device you want to control.")
         call_id = f"dc{next(_ids)}"
+        key = (principal, call_id)
         future: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._pending[call_id] = future
+        self._pending[key] = future
         try:
             await conn.websocket.send_text(json.dumps({
                 "type": "tool_call", "call_id": call_id, "tool": tool,
@@ -106,19 +113,26 @@ class DeviceRegistry:
         except Exception as exc:  # noqa: BLE001 - the socket may have dropped
             return SkillResult(text=f"Could not reach the device: {exc}")
         finally:
-            self._pending.pop(call_id, None)
+            self._pending.pop(key, None)
         return result
 
-    def resolve(self, call_id: str, *, content: str,
+    def resolve(self, principal: str, call_id: str, *, content: str,
                 metadata: dict | None = None) -> bool:
         """Called by the WS receive loop when a ``tool_result`` arrives.
+
+        ``principal`` is the identity of *that socket* (resolved once at
+        connection time from its own auth, never from the message body), so
+        a connection can only ever resolve a call that was issued to it in
+        the first place — sending back another account's call_id, guessed or
+        not, matches nothing and is silently ignored, the same as an unknown
+        or already-resolved id.
 
         No separate "is_error" flag: exactly like every other skill in this
         codebase, a denial or failure is just explanatory text in a normal
         (non-exception) :class:`SkillResult` — the model reads it and reports
         honestly, per the "Acting in the real world" system-prompt rule.
         """
-        future = self._pending.get(call_id)
+        future = self._pending.get((principal, call_id))
         if future is None or future.done():
             return False
         future.set_result(SkillResult(text=content, metadata=metadata or {}))
