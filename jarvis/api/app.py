@@ -24,7 +24,7 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel
 
 from jarvis import __version__
-from jarvis.api.auth import install_auth_routes, resolve_principal
+from jarvis.api.auth import SHARED_PRINCIPAL, install_auth_routes, resolve_principal
 from jarvis.config.settings import Settings, get_settings
 from jarvis.core.engine import JarvisEngine
 from jarvis.licensing import LicenseService
@@ -202,6 +202,36 @@ def create_app(engine: JarvisEngine | None = None,
         principal = _principal(provided)
         if principal is None:
             raise HTTPException(status_code=401, detail="Invalid or missing credentials.")
+        return principal
+
+    def _is_owner_principal(principal: str) -> bool:
+        """True for the operator: the shared API key, or the OWNER_USERNAME account.
+
+        The shared key is a single secret only the operator holds — the same
+        trust level as the owner account. Every other principal is someone
+        else's per-user token, and being signed in does not make them the
+        owner of this server.
+        """
+        if principal == SHARED_PRINCIPAL:
+            return True
+        if not settings.owner_username:
+            return False
+        return principal == f"user:{settings.owner_username.strip().lower()}"
+
+    async def require_owner(
+        principal: str = Depends(require_principal),
+    ) -> str:
+        """Like :func:`require_principal`, but only the server owner passes.
+
+        For actions that affect the whole engine rather than the caller's own
+        account or session — this one shared ``JarvisEngine`` serves every
+        signed-in customer, so "any authenticated caller" is not a narrow
+        enough gate for anything that changes what the engine can do.
+        """
+        if not _is_owner_principal(principal):
+            raise HTTPException(
+                status_code=403,
+                detail="This action is restricted to the server owner.")
         return principal
 
     # -- routes -------------------------------------------------------------
@@ -624,18 +654,40 @@ def create_app(engine: JarvisEngine | None = None,
 
     @app.post("/dashboard/mcp")
     async def dashboard_add_mcp(body: _McpIn,
-                            _: str = Depends(require_principal)) -> dict:
-        """Connect an MCP server at runtime and mount its tools."""
+                            _: str = Depends(require_owner)) -> dict:
+        """Connect an MCP server over SSE at runtime, and mount its tools.
+
+        Owner-only, and SSE-only. This used to also accept a bare command
+        ("command arg1 arg2 …") and hand it straight to
+        ``StdioServerParameters`` — which spawns it as a subprocess of the API
+        server. Combined with ``require_principal`` (any signed-in account,
+        including one a person just created for free through the bot), that
+        was unauthenticated-enough-to-matter remote code execution: one POST
+        with a valid token and a shell one-liner as `spec` ran it on the
+        server. There is no way to make "run this string as a local process"
+        safe to expose over HTTP to customers, so that branch is gone rather
+        than patched — a server that genuinely needs a stdio MCP server
+        configures it via MCP_CONFIG_PATH/MCP_SERVERS (jarvis/mcp/config.py),
+        read once at startup, under the operator's own control.
+
+        The SSE branch stays because it does not execute anything on this
+        server — it only makes the server a network client of a URL — but it
+        is still owner-gated: an SSE connection is still an outbound request
+        the server owner didn't necessarily choose (SSRF against internal
+        services), and there is no reason a customer's account should be able
+        to make the shared engine originate arbitrary outbound connections.
+        """
         from jarvis.mcp.base import MCPServerConfig
         from jarvis.mcp.manager import MCPManager
         spec = body.spec.strip()
-        if spec.startswith("http"):
-            cfg = MCPServerConfig(name=spec.split("//")[-1][:20],
-                                transport="sse", url=spec)
-        else:
-            parts = spec.split()
-            cfg = MCPServerConfig(name=parts[0], command=parts[0],
-                                args=parts[1:])
+        if not (spec.startswith("http://") or spec.startswith("https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="Only an http(s) URL (SSE transport) may be connected "
+                        "here. A local command belongs in the server's own "
+                        "MCP_CONFIG_PATH configuration, not sent over the API.")
+        cfg = MCPServerConfig(name=spec.split("//")[-1][:20],
+                            transport="sse", url=spec)
         mgr = MCPManager([cfg])
         try:
             skills = await mgr.start()
