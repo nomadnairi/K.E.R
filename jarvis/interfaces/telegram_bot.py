@@ -566,6 +566,32 @@ async def run(settings: Settings | None = None) -> None:
         except Exception:  # noqa: BLE001
             pass
 
+    async def _save_password(message: "Message", password: str,
+                            locale: str) -> None:
+        """Set the password on the caller's Telegram-bound account.
+
+        No old password is asked for: the account may never have had one the
+        user knows (a code-only login creates it with a random one nobody is
+        told), so "change" would have nothing to change from.
+        """
+        if license_service is None:
+            return
+        password = (password or "").strip()
+        min_len = settings.auth_min_password_length
+        if len(password) < min_len:
+            await message.answer(t("set_password_bad", locale, min_len=min_len))
+            engine.session(session_id_for(message.from_user.id)
+                        ).scratch["awaiting_password"] = True
+            return
+        acc = license_service.ensure_account_for_telegram(message.from_user.id)
+        license_service.change_password(acc.username, password)
+        await message.answer(t("set_password_saved", locale, username=acc.username))
+        # Best effort: strip the password from the chat (works only where allowed).
+        try:
+            await message.delete()
+        except Exception:  # noqa: BLE001
+            pass
+
     async def _save_integration(message: "Message", kind: str,
                                 locale: str) -> None:
         """Validate + store a user's own integration, enforcing the tier limit."""
@@ -1055,6 +1081,20 @@ async def run(settings: Settings | None = None) -> None:
                 code = license_service.create_telegram_login_code(user.id)
                 await callback.message.answer(
                     t("app_login_code", locale, code=code), parse_mode=None)
+        elif action == "setpass":
+            # A password is optional, not the main door: the code above is
+            # enough for one PC. This exists for the moment someone sets the
+            # app up on a second machine and would rather type a password they
+            # chose than reopen Telegram for a fresh code every time.
+            if license_service is None:
+                await callback.message.answer(t("app_login_off", locale))
+            else:
+                acc = license_service.ensure_account_for_telegram(user.id)
+                engine.session(session_id_for(user.id)
+                            ).scratch["awaiting_password"] = True
+                await callback.message.answer(
+                    t("set_password_ask", locale, username=acc.username,
+                        min_len=settings.auth_min_password_length))
         elif action == "model":
             await _edit(callback, *bm.screen_model(
                 locale, engine.llm.list_profiles(), prefs.get_model(user.id) or ""))
@@ -1278,6 +1318,11 @@ async def run(settings: Settings | None = None) -> None:
         parsed = parse_api_command(message.text)
         if parsed is not None:
             await _handle_api_command(message, parsed, locale)
+            return
+        # A pending "set my password" message is captured before any limit —
+        # it is account setup, not a chat turn.
+        if session.scratch.pop("awaiting_password", False):
+            await _save_password(message, message.text, locale)
             return
         # A pending "connect your key" message is captured before any limit.
         awaiting_provider = session.scratch.pop("awaiting_byok", None)

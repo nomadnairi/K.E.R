@@ -287,6 +287,33 @@ class LicenseService:
         ).fetchone()
         return self._account_from_row(row) if row else None
 
+    def ensure_account_for_telegram(self, telegram_user_id: int) -> Account:
+        """The account bound to this Telegram user, creating one if needed.
+
+        Shared by :meth:`redeem_telegram_login` (silent, via a bot-issued code)
+        and the bot's own "set a password" flow (explicit — so a person can
+        also sign in with a username and password, which matters the moment
+        they set the app up on a second machine and would rather not fetch a
+        fresh code from Telegram every time).
+
+        A freshly created account gets a random password nobody is ever told;
+        it is reachable only through a login code until someone calls
+        :meth:`change_password` on it.
+        """
+        tg = int(telegram_user_id)
+        acc = self.get_account_by_telegram(tg)
+        if acc is not None:
+            return acc
+        username = f"tg{tg}"
+        if self.get_account(username) is not None:
+            username = f"tg{tg}_{secrets.token_hex(2)}"
+        acc = self.create_account(username, secrets.token_urlsafe(16))
+        self._conn.execute(
+            "UPDATE accounts SET telegram_user_id = ?, telegram_verified = 1 "
+            "WHERE id = ?", (tg, acc.id))
+        self._conn.commit()
+        return self._account_row(acc.id)
+
     def set_active(self, username: str, active: bool) -> None:
         self._conn.execute(
             "UPDATE accounts SET active = ? WHERE username = ?",
@@ -599,17 +626,7 @@ class LicenseService:
         self._conn.execute(
             "UPDATE tg_login_codes SET used = 1 WHERE code = ?", (code,))
         self._conn.commit()
-        acc = self.get_account_by_telegram(tg)
-        if acc is None:
-            username = f"tg{tg}"
-            if self.get_account(username) is not None:
-                username = f"tg{tg}_{secrets.token_hex(2)}"
-            acc = self.create_account(username, secrets.token_urlsafe(16))
-            self._conn.execute(
-                "UPDATE accounts SET telegram_user_id = ?, telegram_verified = 1 "
-                "WHERE id = ?", (tg, acc.id))
-            self._conn.commit()
-            acc = self._account_row(acc.id)
+        acc = self.ensure_account_for_telegram(tg)
         return self.issue_token(acc.id), acc.username
 
     def confirm_pairing(self, code: str, telegram_user_id: int) -> Account | None:

@@ -699,6 +699,7 @@ def screen_link(locale: str, *, app_login: bool = False) -> tuple[str, Rows]:
     rows: Rows = []
     if app_login:
         rows.append([_b(t("app_login_btn", locale), "appcode")])
+        rows.append([_b(t("set_password_btn", locale), "setpass")])
     rows.append(_back(locale))
     return text, rows
 

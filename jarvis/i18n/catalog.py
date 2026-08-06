@@ -291,6 +291,17 @@ CATALOG: dict[str, dict[str, str]] = {
         "app_login_btn": "🖥 App login code",
         "app_login_code": "🖥 Your app login code (valid 10 min):\n\n{code}\n\nEnter it in the app via Sign in with Telegram.",
         "app_login_off": "ℹ️ App login is not enabled on this bot.",
+        "set_password_btn": "🔐 Set a password",
+        "set_password_ask": (
+            "🔐 Your login is <b>{username}</b>.\n\nSend the password you want "
+            "to use (at least {min_len} characters) — you'll use this pair to "
+            "sign in on any PC, not just this one."
+        ),
+        "set_password_bad": "⚠️ Needs at least {min_len} characters. Try again.",
+        "set_password_saved": (
+            "✅ Password set. Sign in anywhere with <b>{username}</b> and this "
+            "password — please delete this message."
+        ),
         "link_success": "✅ Telegram linked to your account <b>{username}</b>.",
         "link_invalid": "❌ That code is invalid or has expired. Get a new one in the app.",
         "link_disabled": "ℹ️ Account linking is not enabled on this server.",
@@ -572,6 +583,17 @@ CATALOG: dict[str, dict[str, str]] = {
         "app_login_btn": "🖥 Код для входа в приложение",
         "app_login_code": "🖥 Код для входа в приложение (действует 10 мин):\n\n{code}\n\nВведите его в приложении: Войти через Telegram.",
         "app_login_off": "ℹ️ Вход в приложение не включён на этом боте.",
+        "set_password_btn": "🔐 Задать пароль",
+        "set_password_ask": (
+            "🔐 Ваш логин — <b>{username}</b>.\n\nПришлите пароль, который "
+            "хотите использовать (не меньше {min_len} символов) — этой парой "
+            "можно будет войти на любом ПК, не только на этом."
+        ),
+        "set_password_bad": "⚠️ Нужно не меньше {min_len} символов. Попробуйте ещё раз.",
+        "set_password_saved": (
+            "✅ Пароль задан. Входите где угодно как <b>{username}</b> с этим "
+            "паролем — удалите это сообщение."
+        ),
         "link_success": "✅ Telegram привязан к вашему аккаунту <b>{username}</b>.",
         "link_invalid": "❌ Код неверный или истёк. Получите новый в приложении.",
         "link_disabled": "ℹ️ Привязка аккаунтов на этом сервере не включена.",
@@ -858,6 +880,17 @@ CATALOG: dict[str, dict[str, str]] = {
         "app_login_btn": "🖥 Ilovaga kirish kodi",
         "app_login_code": "🖥 Ilovaga kirish kodi (10 daqiqa):\n\n{code}\n\nIlovada Telegram orqali kiring.",
         "app_login_off": "ℹ️ Ilovaga kirish bu botda yoqilmagan.",
+        "set_password_btn": "🔐 Parol o'rnatish",
+        "set_password_ask": (
+            "🔐 Loginingiz — <b>{username}</b>.\n\nIshlatmoqchi bo'lgan "
+            "parolni yuboring (kamida {min_len} belgi) — bu juftlik bilan "
+            "istalgan kompyuterda kira olasiz."
+        ),
+        "set_password_bad": "⚠️ Kamida {min_len} belgi kerak. Qayta urinib ko'ring.",
+        "set_password_saved": (
+            "✅ Parol o'rnatildi. Istalgan joyda <b>{username}</b> va shu parol "
+            "bilan kiring — bu xabarni o'chiring."
+        ),
         "link_success": "✅ Telegram <b>{username}</b> hisobingizga bog'landi.",
         "link_invalid": "❌ Kod noto'g'ri yoki muddati o'tgan. Ilovada yangisini oling.",
         "link_disabled": "ℹ️ Bu serverda hisob bog'lash yoqilmagan.",

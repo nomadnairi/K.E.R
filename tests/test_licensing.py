@@ -162,6 +162,36 @@ def test_telegram_login_bad_code(svc: LicenseService):
     assert svc.redeem_telegram_login("000000") is None
 
 
+# -- ensure_account_for_telegram (the bot's "set a password" flow) -----------
+#
+# Shared by redeem_telegram_login (silent) and the bot's own password-setting
+# button (explicit) — a person who wants to sign in on a second PC can set a
+# password on the account their Telegram code already created.
+
+
+def test_ensure_account_for_telegram_creates_once(svc: LicenseService):
+    acc1 = svc.ensure_account_for_telegram(555010)
+    acc2 = svc.ensure_account_for_telegram(555010)
+    assert acc1.id == acc2.id
+    assert acc1.telegram_verified is True
+
+
+def test_ensure_account_for_telegram_matches_login_code_path(svc: LicenseService):
+    # Redeeming a code first, then asking to "set a password" for the same
+    # person, must land on the same account rather than creating a second one.
+    code = svc.create_telegram_login_code(555011)
+    _token, username = svc.redeem_telegram_login(code)
+    acc = svc.ensure_account_for_telegram(555011)
+    assert acc.username == username
+
+
+def test_set_password_then_login_with_it(svc: LicenseService):
+    acc = svc.ensure_account_for_telegram(555012)
+    svc.change_password(acc.username, "correct horse battery")
+    logged_in = svc.authenticate(acc.username, "correct horse battery")
+    assert logged_in.id == acc.id
+
+
 def test_migrates_an_accounts_table_predating_telegram_columns(tmp_path):
     # Simulates a database created before telegram_user_id/telegram_verified
     # existed in the schema -- CREATE TABLE IF NOT EXISTS is a no-op against
