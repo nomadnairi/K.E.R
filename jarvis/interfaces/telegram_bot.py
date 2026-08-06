@@ -63,6 +63,28 @@ def session_id_for(user_id: int) -> str:
     return f"tg-{user_id}"
 
 
+def principal_session_id(user_id: int, service) -> str:
+    """The session key this Telegram user shares with the rest of their account.
+
+    ``service`` is a :class:`~jarvis.licensing.service.LicenseService` or
+    ``None`` (accounts disabled). When the Telegram user is linked to an
+    account (``get_account_by_telegram`` — verified pairing only), the key
+    matches what the API uses for that account's default chat session
+    (``f"user:{username}::default"``, the same shape ``jarvis.api.app._scoped``
+    builds) — so a fact told to the bot is visible from Desktop/Web afterwards,
+    and vice versa. An unlinked user keeps the original ``tg-<id>`` key,
+    completely unaffected — this only changes behaviour once linking exists.
+    """
+    if service is not None:
+        try:
+            account = service.get_account_by_telegram(user_id)
+        except Exception:  # noqa: BLE001 - a lookup glitch must not break chat
+            account = None
+        if account is not None:
+            return f"user:{account.username}::default"
+    return session_id_for(user_id)
+
+
 def split_message(text: str, limit: int = _TELEGRAM_MAX) -> list[str]:
     """Split ``text`` into Telegram-sized chunks on line boundaries."""
     text = text or "…"
@@ -95,6 +117,7 @@ async def generate_reply(engine: JarvisEngine, user_id: int, text: str,
                         source: str = "cli",
                         plan_images: bool = True,
                         return_metadata: bool = False,
+                        session_id: str | None = None,
                         ) -> str | tuple[str, dict]:
     """Produce the assistant's reply for a Telegram user (testable core).
 
@@ -110,11 +133,15 @@ async def generate_reply(engine: JarvisEngine, user_id: int, text: str,
     ``generate_image`` tool for this turn. ``return_metadata=True`` returns
     ``(text, metadata)`` instead of bare text, so a caller can pick up
     tool-produced artifacts (e.g. a generated image) — default ``False``
-    keeps every existing caller's return type unchanged.
+    keeps every existing caller's return type unchanged. ``session_id``
+    overrides the default ``tg-<user_id>`` key — pass
+    :func:`principal_session_id` from the caller so a linked account shares
+    its session with Desktop/Web instead of talking to a Telegram-only
+    silo; omitted, behaviour is unchanged (existing tests and callers).
     """
     from jarvis.models.response import Request
 
-    session_id = session_id_for(user_id)
+    session_id = session_id or session_id_for(user_id)
     session = engine.session(session_id)
     if match_input_language:
         session.scratch.pop("language", None)
@@ -297,6 +324,14 @@ async def run(settings: Settings | None = None) -> None:
         license_service = LicenseService(
             settings.auth_db_path, token_ttl_hours=settings.auth_token_ttl_hours
         )
+
+    def _session_id(user_id: int) -> str:
+        """Every handler below goes through this, not the bare ``tg-<id>``
+        key, so a linked account's chat/scratch state (reset, language,
+        model pref, ...) all live in the one session shared with Desktop/Web
+        — not just the reply text. See :func:`principal_session_id`."""
+        return principal_session_id(user_id, license_service)
+
     billing = None
     if settings.billing_enabled and license_service is not None:
         from jarvis.billing import BillingService
@@ -464,7 +499,8 @@ async def run(settings: Settings | None = None) -> None:
             model_profile=prefs.get_model(user_id),
             model_id=prefs.get_model_id(user_id),
             byok=prefs.get_byok(user_id),
-            assistant_name=prefs.get_assistant_name(user_id), usage=usage)
+            assistant_name=prefs.get_assistant_name(user_id), usage=usage,
+            session_id=_session_id(user_id))
         for chunk in split_message(reply):
             await message.answer(chunk, parse_mode=None)
 
@@ -547,7 +583,7 @@ async def run(settings: Settings | None = None) -> None:
         key = (key or "").strip()
         if len(key) < 12 or " " in key:
             await message.answer(t("byok_bad", locale), parse_mode=None)
-            engine.session(session_id_for(message.from_user.id)
+            engine.session(_session_id(message.from_user.id)
                         ).scratch["awaiting_byok"] = provider
             return
         from jarvis.config.constants import DEFAULT_MODELS
@@ -557,7 +593,7 @@ async def run(settings: Settings | None = None) -> None:
             "openrouter": settings.openrouter_model,
         }.get(provider, "")
         prefs.set_byok(message.from_user.id, provider, key, model)
-        engine.session(session_id_for(message.from_user.id)).scratch["byok"] = {
+        engine.session(_session_id(message.from_user.id)).scratch["byok"] = {
             "provider": provider, "key": key, "model": model}
         await message.answer(t("byok_saved", locale))
         # Best effort: strip the key from the chat (works only where allowed).
@@ -580,7 +616,7 @@ async def run(settings: Settings | None = None) -> None:
         min_len = settings.auth_min_password_length
         if len(password) < min_len:
             await message.answer(t("set_password_bad", locale, min_len=min_len))
-            engine.session(session_id_for(message.from_user.id)
+            engine.session(_session_id(message.from_user.id)
                         ).scratch["awaiting_password"] = True
             return
         acc = license_service.ensure_account_for_telegram(message.from_user.id)
@@ -611,7 +647,7 @@ async def run(settings: Settings | None = None) -> None:
             parts_ = [p.strip() for p in re.split(r"[|\n]", text, maxsplit=1)]
             if len(parts_) != 2:
                 await message.answer(t("uint_ask_ha", locale))
-                engine.session(session_id_for(user_id)
+                engine.session(_session_id(user_id)
                             ).scratch["awaiting_integration"] = kind
                 return
             config = {"url": parts_[0], "token": parts_[1]}
@@ -643,7 +679,7 @@ async def run(settings: Settings | None = None) -> None:
             return
         # kind == "search"
         results = await model_index.search(a, limit=8)
-        engine.session(session_id_for(user_id)).scratch["search_results"] = [
+        engine.session(_session_id(user_id)).scratch["search_results"] = [
             m.slug for m in results]
         text, rows = bm.screen_search(
             locale, results, prefs.get_model_id(user_id) or "")
@@ -762,7 +798,7 @@ async def run(settings: Settings | None = None) -> None:
         if action == "market":
             await _edit(callback, *bm.screen_market_hub(locale))
         elif action == "mktsearch":
-            engine.session(session_id_for(user.id)
+            engine.session(_session_id(user.id)
                         ).scratch["awaiting_market_search"] = True
             await callback.message.answer(t("market_search_ask", locale))
         elif action == "mktpop":
@@ -802,7 +838,7 @@ async def run(settings: Settings | None = None) -> None:
                 return
             prefs.set_model_id(user.id, card.slug)
             prefs.set_model(user.id, "")
-            sess = engine.session(session_id_for(user.id))
+            sess = engine.session(_session_id(user.id))
             sess.scratch["model_id"] = card.slug
             sess.scratch.pop("model_profile", None)
             await callback.message.answer(t("model_set", locale, model=card.name))
@@ -815,19 +851,19 @@ async def run(settings: Settings | None = None) -> None:
                     can_use=_openrouter_available(user.id)))
         elif action == "mktcmpadd":
             card = mr.at(int(parts[2]))
-            sess = engine.session(session_id_for(user.id))
+            sess = engine.session(_session_id(user.id))
             basket = sess.scratch.setdefault("compare", [])
             if card and card.slug not in basket and len(basket) < 4:
                 basket.append(card.slug)
             cards = [mr.get(s) for s in basket if mr.get(s)]
             await _edit(callback, *bm.screen_compare(locale, cards))
         elif action == "mktcmp":
-            basket = engine.session(session_id_for(user.id)
+            basket = engine.session(_session_id(user.id)
                                     ).scratch.get("compare", [])
             cards = [mr.get(s) for s in basket if mr.get(s)]
             await _edit(callback, *bm.screen_compare(locale, cards))
         elif action == "mktcmpclear":
-            engine.session(session_id_for(user.id)).scratch["compare"] = []
+            engine.session(_session_id(user.id)).scratch["compare"] = []
             await _edit(callback, *bm.screen_compare(locale, []))
 
     async def _show_plans(callback: "CallbackQuery", text: str, rows) -> None:
@@ -923,7 +959,7 @@ async def run(settings: Settings | None = None) -> None:
             # Send the example as if the user typed it (strip the leading emoji).
             await _run_prompt(callback.message, user.id, prompt, locale)
         elif action == "newchat":
-            await engine.reset(session_id_for(user.id))
+            await engine.reset(_session_id(user.id))
             await _edit(callback, t("newchat_done", locale),
                         [[(t("menu_back", locale), "m:main")]])
         elif action == "reminders":
@@ -952,7 +988,7 @@ async def run(settings: Settings | None = None) -> None:
                     locale, plans, _user_plan(user.id).name))
                 return
             kind = parts[2]
-            engine.session(session_id_for(user.id)
+            engine.session(_session_id(user.id)
                         ).scratch["awaiting_integration"] = kind
             ask = "uint_ask_ha" if kind == "homeassistant" else "uint_ask_hook"
             await callback.message.answer(t(ask, locale))
@@ -967,12 +1003,12 @@ async def run(settings: Settings | None = None) -> None:
             await _edit(callback, *_settings_prefs(locale, user.id))
         elif action == "renamea":
             engine.session(
-                session_id_for(user.id)).scratch["awaiting_assistant_name"] = True
+                _session_id(user.id)).scratch["awaiting_assistant_name"] = True
             current = prefs.get_assistant_name(user.id) or settings.assistant_name
             await callback.message.answer(
                 t("rename_ask", locale, name=current))
         elif action == "support":
-            engine.session(session_id_for(user.id)).scratch["awaiting_support"] = True
+            engine.session(_session_id(user.id)).scratch["awaiting_support"] = True
             await callback.message.answer(t("support_ask", locale))
         elif action == "about":
             from jarvis import __version__
@@ -1010,7 +1046,7 @@ async def run(settings: Settings | None = None) -> None:
                 return
             prefs.set_model_id(user.id, model.slug)
             prefs.set_model(user.id, "")  # a specific model supersedes a profile
-            sess = engine.session(session_id_for(user.id))
+            sess = engine.session(_session_id(user.id))
             sess.scratch["model_id"] = model.slug
             sess.scratch.pop("model_profile", None)
             await _edit(callback, *bm.screen_catalog(
@@ -1021,11 +1057,11 @@ async def run(settings: Settings | None = None) -> None:
             if not plan.images:
                 await _show_plans(callback, *bm.screen_plans_hub(locale, plans, plan.name))
                 return
-            engine.session(session_id_for(user.id)).scratch["awaiting_image"] = True
+            engine.session(_session_id(user.id)).scratch["awaiting_image"] = True
             await callback.message.answer(t("image_ask", locale))
         elif action == "pick":
             idx = int(parts[2])
-            slugs = engine.session(session_id_for(user.id)
+            slugs = engine.session(_session_id(user.id)
                                 ).scratch.get("search_results", [])
             if not (0 <= idx < len(slugs)):
                 return
@@ -1035,7 +1071,7 @@ async def run(settings: Settings | None = None) -> None:
             slug = slugs[idx]
             prefs.set_model_id(user.id, slug)
             prefs.set_model(user.id, "")
-            sess = engine.session(session_id_for(user.id))
+            sess = engine.session(_session_id(user.id))
             sess.scratch["model_id"] = slug
             sess.scratch.pop("model_profile", None)
             await callback.message.answer(t("model_set", locale, model=slug))
@@ -1060,11 +1096,11 @@ async def run(settings: Settings | None = None) -> None:
             await _edit(callback, *bm.screen_byok(locale, current))
         elif action == "byokset":
             provider = parts[2]
-            engine.session(session_id_for(user.id)).scratch["awaiting_byok"] = provider
+            engine.session(_session_id(user.id)).scratch["awaiting_byok"] = provider
             await callback.message.answer(t("byok_ask", locale))
         elif action == "byokoff":
             prefs.clear_byok(user.id)
-            engine.session(session_id_for(user.id)).scratch.pop("byok", None)
+            engine.session(_session_id(user.id)).scratch.pop("byok", None)
             await _edit(callback, t("byok_cleared", locale),
                         [[(t("menu_back", locale), "m:settings")]])
         elif action == "memory":
@@ -1090,7 +1126,7 @@ async def run(settings: Settings | None = None) -> None:
                 await callback.message.answer(t("app_login_off", locale))
             else:
                 acc = license_service.ensure_account_for_telegram(user.id)
-                engine.session(session_id_for(user.id)
+                engine.session(_session_id(user.id)
                             ).scratch["awaiting_password"] = True
                 await callback.message.answer(
                     t("set_password_ask", locale, username=acc.username,
@@ -1117,7 +1153,7 @@ async def run(settings: Settings | None = None) -> None:
                 bm.card_rows(locale, "subscription"))
         elif action == "setmodel":
             choice = parts[2]
-            session = engine.session(session_id_for(user.id))
+            session = engine.session(_session_id(user.id))
             # Picking a profile supersedes any specific catalog model.
             prefs.set_model_id(user.id, "")
             session.scratch.pop("model_id", None)
@@ -1131,17 +1167,17 @@ async def run(settings: Settings | None = None) -> None:
         elif action == "setlang":
             new_locale = normalize_locale(parts[2])
             prefs.set_language(user.id, new_locale)
-            engine.session(session_id_for(user.id)).scratch["language"] = new_locale
+            engine.session(_session_id(user.id)).scratch["language"] = new_locale
             await _edit(callback, *_settings_prefs(new_locale, user.id))
         elif action in ("reset", "forget"):
             # Ask before wiping — these are destructive.
             await _edit(callback, *bm.screen_confirm(locale, action))
         elif action == "reset_do":
-            await engine.reset(session_id_for(user.id))
+            await engine.reset(_session_id(user.id))
             await _edit(callback, "🧹 " + t("reset_done", locale),
                         [[(t("menu_back", locale), "m:memory")]])
         elif action == "forget_do":
-            await engine.forget(session_id_for(user.id))
+            await engine.forget(_session_id(user.id))
             await _edit(callback, "🗑 " + t("forget_done", locale),
                         [[(t("menu_back", locale), "m:memory")]])
         elif action == "plans":
@@ -1184,7 +1220,7 @@ async def run(settings: Settings | None = None) -> None:
     async def _pick_language(callback: "CallbackQuery") -> None:
         locale = normalize_locale(callback.data.split(":", 1)[1])
         prefs.set_language(callback.from_user.id, locale)
-        engine.session(session_id_for(callback.from_user.id)).scratch["language"] = locale
+        engine.session(_session_id(callback.from_user.id)).scratch["language"] = locale
         await callback.answer()
         text, rows = _main_screen(callback.from_user.id, locale)
         try:
@@ -1279,7 +1315,7 @@ async def run(settings: Settings | None = None) -> None:
             await _show_gate(message, locale)
             return
         prefs.touch(message.from_user.id, message.chat.id)
-        session = engine.session(session_id_for(message.from_user.id))
+        session = engine.session(_session_id(message.from_user.id))
         # A pending support message is forwarded to the owner (before anything else).
         if session.scratch.pop("awaiting_support", False):
             await _send_support(message, locale)
@@ -1350,6 +1386,7 @@ async def run(settings: Settings | None = None) -> None:
             usage=usage,
             plan_images=_user_plan(message.from_user.id).images,
             return_metadata=True,
+            session_id=_session_id(message.from_user.id),
         ))
         # LLM output is plain text — disable HTML parsing to avoid entity errors.
         for chunk in split_message(reply):
@@ -1416,6 +1453,7 @@ async def run(settings: Settings | None = None) -> None:
                 assistant_name=prefs.get_assistant_name(message.from_user.id),
                 usage=usage,
                 source="voice",
+                session_id=_session_id(message.from_user.id),
             )
         logger.info("Voice: LLM reply took %.0fms", sw_llm.elapsed_ms)
         for chunk in split_message(reply):
@@ -1567,7 +1605,8 @@ async def run(settings: Settings | None = None) -> None:
                     try:
                         reply = await generate_reply(
                             engine, int(a["user_id"]), a["prompt"], loc,
-                            assistant_name=prefs.get_assistant_name(a["user_id"]))
+                            assistant_name=prefs.get_assistant_name(a["user_id"]),
+                            session_id=_session_id(int(a["user_id"])))
                         await bot.send_message(
                             int(a["chat_id"]),
                             t("auto_fire", loc, prompt=a["prompt"][:60],
