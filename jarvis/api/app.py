@@ -938,6 +938,72 @@ def create_app(engine: JarvisEngine | None = None,
                                 detail="That request is no longer waiting.")
         return {"ok": True, "id": body.id, "allowed": body.allow}
 
+    # -- devices ---------------------------------------------------------------
+    #
+    # Two independent sources, merged: DeviceRegistry (jarvis/desktop/
+    # device_registry.py) knows which devices can run a desktop-control tool
+    # call *right now* — live WebSocket connections only, nothing persisted.
+    # LicenseService.list_sessions (Этап 2 / Фаза A2) knows every session
+    # (login) ever issued to the account — Telegram, Web, Desktop — with a
+    # "last seen" stamp that survives a dropped connection. Neither alone
+    # answers "what does this account have logged in": the registry forgets
+    # a device the moment it disconnects, and sessions don't know whether a
+    # desktop-control socket happens to be open right now.
+
+    def _account_for_principal(principal: str):
+        """The account row behind ``principal``, or ``None``.
+
+        Only ``user:<username>`` principals have one — the shared API_KEY
+        (``SHARED_PRINCIPAL``) is a single operator secret with no account
+        row of its own, so it has no session history to list. Same
+        single-tenant-vs-real-accounts distinction ``_tenant_prefix`` and
+        ``_confirm_owner`` already draw.
+        """
+        if service is None or not principal.startswith("user:"):
+            return None
+        return service.get_account(principal[len("user:"):])
+
+    @app.get("/dashboard/devices")
+    async def dashboard_devices(
+            principal: str = Depends(require_principal)) -> dict:
+        """This account's devices: live desktop-control connections merged
+        with every session ever issued to it. Session history is only
+        available with accounts enabled — in shared-key/open mode this shows
+        live desktop-control connections alone, with no login history."""
+        live = engine.container.devices.describe(principal)
+        live_ids = {d["device_id"] for d in live if d.get("device_id")}
+        sessions: list[dict] = []
+        account = _account_for_principal(principal)
+        if account is not None:
+            for s in service.list_sessions(account.id):
+                sessions.append({
+                    **s,
+                    "online": bool(s["device_id"]) and s["device_id"] in live_ids,
+                })
+        return {"live_devices": live, "sessions": sessions}
+
+    class _RevokeSessionIn(BaseModel):
+        id: str
+
+    @app.post("/dashboard/devices/revoke")
+    async def dashboard_devices_revoke(
+            body: _RevokeSessionIn,
+            principal: str = Depends(require_principal)) -> dict:
+        """End one of *this account's own* sessions — e.g. signing an old
+        phone or a lost laptop out remotely."""
+        account = _account_for_principal(principal)
+        if account is None:
+            raise HTTPException(status_code=404,
+                                detail="No session history without an account.")
+        revoked = service.revoke_session(account.id, body.id)
+        if not revoked:
+            # Unknown id and someone else's id are reported identically —
+            # same "don't confirm which" reasoning as /dashboard/confirm.
+            raise HTTPException(status_code=404,
+                                detail="That session is not yours or no "
+                                        "longer exists.")
+        return {"ok": True, "id": body.id}
+
     # -- memory --------------------------------------------------------------
 
     def _memory():
