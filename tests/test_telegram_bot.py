@@ -7,6 +7,7 @@ import pytest
 from jarvis.config.settings import Settings
 from jarvis.interfaces.telegram_bot import (
     _is_allowed,
+    menu_action_is_gated,
     generate_reply,
     session_id_for,
     split_message,
@@ -117,3 +118,27 @@ async def test_source_flows_onto_the_request(engine, fake_provider):
     # tool-round budget / concise-reply hint (see test_engine.py for that).
     await generate_reply(engine, user_id=15, text="hi", source="voice")
     assert fake_provider.calls  # sanity: the engine actually ran a completion
+
+
+# --- subscription gate on menu buttons -------------------------------------
+#
+# The gate used to guard /start, free text and voice but not callbacks, so the
+# whole menu stayed reachable by button for someone who had never joined the
+# channel — or who had joined once and left.
+
+
+def test_menu_buttons_are_gated_for_ordinary_users():
+    assert menu_action_is_gated("memory", is_admin=False) is True
+    assert menu_action_is_gated("tariffs", is_admin=False) is True
+    assert menu_action_is_gated("main", is_admin=False) is True
+
+
+def test_checksub_is_never_gated():
+    # Gating it would make the only way out of the gate screen unreachable.
+    assert menu_action_is_gated("checksub", is_admin=False) is False
+
+
+def test_admins_bypass_the_gate():
+    # An owner who has not joined their own channel must still reach the panel.
+    assert menu_action_is_gated("adminpanel", is_admin=True) is False
+    assert menu_action_is_gated("memory", is_admin=True) is False

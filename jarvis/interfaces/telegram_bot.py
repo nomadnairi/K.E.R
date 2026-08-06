@@ -223,6 +223,26 @@ def handle_link(service, text: str, telegram_user_id: int, locale: str) -> str:
     return t("link_success", locale, username=account.username)
 
 
+def menu_action_is_gated(action: str, *, is_admin: bool) -> bool:
+    """Whether a menu button must be refused until the user joins the channel.
+
+    The policy lives here rather than inline in the handler so it can be tested
+    without a Telegram connection — the handlers themselves are closures inside
+    :func:`run`, which the suite deliberately does not reach.
+
+    Two carve-outs, both deliberate:
+
+    * ``checksub`` is the "I've subscribed" button. Gating it would make the
+      only way out of the gate screen unreachable.
+    * Admins pass regardless. The gate is a growth tool, not a security
+      boundary, and an owner who has not joined their own channel would
+      otherwise be locked out of the admin panel with no way back in.
+    """
+    if is_admin:
+        return False
+    return action != "checksub"
+
+
 def _resolve_locale(prefs: UserPreferences, user) -> str:
     """User's stored language, else a guess from their Telegram client."""
     stored = prefs.get_language(user.id)
@@ -819,6 +839,22 @@ async def run(settings: Settings | None = None) -> None:
                 await _edit(callback, *_main_screen(user.id, locale))
             else:
                 await callback.answer(t("gate_not_yet", locale), show_alert=True)
+            return
+
+        # Every other menu action runs behind the same gate. Guarding only
+        # /start, free text and voice left the entire menu reachable by button:
+        # a keyboard from an earlier session — or from before the channel was
+        # configured — kept working for someone who had since left the channel,
+        # so the gate was advisory rather than enforced.
+        gated = menu_action_is_gated(
+            action, is_admin=user.id in settings.telegram_admins()
+        )
+        if gated and not await _is_subscribed(user.id):
+            from jarvis.interfaces.bot_menu import gate_screen
+
+            await callback.answer(t("gate_not_yet", locale), show_alert=True)
+            await _edit(callback, *gate_screen(
+                locale, settings.telegram_required_channel))
             return
 
         await callback.answer()
