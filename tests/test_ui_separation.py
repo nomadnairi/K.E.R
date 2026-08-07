@@ -224,3 +224,46 @@ def test_the_password_form_is_hidden_without_a_server_account():
     render_fn = html.split("function renderProfile")[1].split("function ")[0]
     assert "canChangePassword" in render_fn
     assert "PLAN.username" in render_fn.split("canChangePassword")[1].split(";")[0]
+
+
+# -- clickable chat history (Этап 2 / Фаза B6) -------------------------------
+
+
+def test_history_items_carry_their_session_id():
+    """groupByDay used to drop session_id on the floor — a history entry is
+    a chat with a different session_id, so the id has to survive into what
+    renderHist draws."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    group_fn = html.split("function groupByDay")[1].split("function ")[0]
+    assert "r.session_id" in group_fn
+
+
+def test_history_items_are_clickable_and_open_the_session():
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert "openHistorySession" in html
+    render_fn = html.split("function renderHist")[1].split("function ")[0]
+    assert "onclick=" in render_fn and "openHistorySession" in render_fn
+
+
+def test_opening_history_fetches_that_sessions_messages():
+    html = DESKTOP.read_text(encoding="utf-8")
+    open_fn = html.split("async function openHistorySession")[1].split("\n  }")[0]
+    assert "/dashboard/sessions/" in open_fn and "/messages" in open_fn
+
+
+def test_reopening_a_session_redirects_new_messages_to_it():
+    """The composer must stop talking to the fixed 'dashboard' session once
+    a real history entry is open — otherwise 'reopening' would only be a
+    read-only history view, not the chat continuing where it left off."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    send_fn = html.split("async function sendMsg")[1].split("function ")[0]
+    assert "ACTIVE_SESSION" in send_fn
+    assert 'session_id:"dashboard"' not in send_fn
+
+
+def test_new_chat_returns_to_the_default_session():
+    """Otherwise a fresh 'Новый чат' after browsing history would keep
+    appending to whatever old session was last opened."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    new_chat_fn = html.split("function newChat")[1].split("\n  }")[0]
+    assert "DEFAULT_SESSION" in new_chat_fn

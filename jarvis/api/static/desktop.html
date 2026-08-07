@@ -1139,12 +1139,21 @@
   }
 
   // ---- chat + history ----  (loaded live; no fabricated conversations)
+  //
+  // History used to be inert (Этап 2 / Фаза B6 audit) — sessions were listed
+  // but clicking one did nothing, and the main chat always talked to one
+  // fixed session_id ("dashboard"). A history entry IS a chat with a
+  // different session_id, so "opening" one means switching which id the
+  // composer sends to /chat, not building a second chat screen.
   const HIST_EMPTY=[["История",[]]];
+  const DEFAULT_SESSION="dashboard";
+  let ACTIVE_SESSION=DEFAULT_SESSION;       // raw id sent as /chat's session_id
+  let ACTIVE_SESSION_FULL=null;             // the full "principal::id" from the server, for highlighting
   function groupByDay(rows){
     const today=new Date().toDateString(), out={};
     rows.forEach(r=>{const d=new Date((r.last_ts||0)*1000);
       const key=d.toDateString()===today?"Сегодня":d.toLocaleDateString([],{day:"numeric",month:"short"});
-      (out[key]=out[key]||[]).push([r.title, d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})]);});
+      (out[key]=out[key]||[]).push([r.title, d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}), r.session_id]);});
     return Object.entries(out);
   }
   async function loadSessions(){
@@ -1153,14 +1162,52 @@
       renderHist(d.sessions&&d.sessions.length?groupByDay(d.sessions):HIST_EMPTY);}
     catch(e){renderHist(HIST_EMPTY);}
   }
-  function renderHist(groups){$("histList").innerHTML=(groups||[]).map(([g,items])=>`<div class="hgrp">${g}</div>`+(items.length?items.map((it,i)=>`<div class="item ${g==='Сегодня'&&i===0?'on':''}"><span>${(it[0]||'').replace(/</g,'&lt;')}</span><time>${it[1]}</time></div>`).join(""):'<div class="item" style="color:var(--dim)">пусто</div>')).join("");}
+  function renderHist(groups){
+    $("histList").innerHTML=(groups||[]).map(([g,items])=>`<div class="hgrp">${g}</div>`+(items.length?items.map(it=>{
+      const sid=it[2];
+      const on=sid&&sid===ACTIVE_SESSION_FULL?" on":"";
+      const click=sid?` onclick="openHistorySession('${esc(sid)}')" style="cursor:pointer"`:"";
+      return `<div class="item${on}"${click}><span>${(it[0]||'').replace(/</g,'&lt;')}</span><time>${it[1]}</time></div>`;
+    }).join(""):'<div class="item" style="color:var(--dim)">пусто</div>')).join("");
+  }
   renderHist(HIST_EMPTY);
   function botName(){const e=$("coreName"); return (e&&e.textContent.trim())||"KER";}
-  function newChat(){$("stream").innerHTML='<div class="msg j"><div class="who">'+botName()+'</div>Новый диалог. Чем могу помочь, сэр?</div>';}
+  function newChat(){
+    ACTIVE_SESSION=DEFAULT_SESSION; ACTIVE_SESSION_FULL=null;
+    $("stream").innerHTML='<div class="msg j"><div class="who">'+botName()+'</div>Новый диалог. Чем могу помочь, сэр?</div>';
+    document.querySelectorAll("#histList .item").forEach(el=>el.classList.remove("on"));
+  }
+  //: Reopen a past conversation: load its messages and point the composer
+  //: at it. fullId is the server's "principal::id" — stripping everything
+  //: up to the first "::" gives back the raw id /chat expects, without the
+  //: page needing to know or reconstruct its own principal string.
+  async function openHistorySession(fullId){
+    const stream=$("stream"); if(!stream||!CFG.api) return;
+    stream.innerHTML='<div class="msg j"><div class="who">'+botName()+'</div>Загрузка истории…</div>';
+    try{
+      const r=await fetch(CFG.api+"/dashboard/sessions/"+encodeURIComponent(fullId)+"/messages",
+        {headers:authH()});
+      if(!r.ok) throw new Error("http "+r.status);
+      const d=await r.json();
+      ACTIVE_SESSION_FULL=fullId;
+      ACTIVE_SESSION=fullId.includes("::")?fullId.split("::").slice(1).join("::"):fullId;
+      const msgs=d.messages||[];
+      stream.innerHTML=msgs.length?msgs.map(m=>{
+        const who=m.role==="user"?"u":"j";
+        const label=m.role==="user"?"Вы":(m.role==="system"?"Система":botName());
+        return `<div class="msg ${who}"><div class="who">${label}</div>`
+          +String(m.content||"").replace(/</g,"&lt;")+"</div>";
+      }).join("") : '<div class="msg j"><div class="who">'+botName()+'</div>В этой сессии пока нет сообщений.</div>';
+      stream.scrollTop=stream.scrollHeight;
+      loadSessions();  // re-render the list so the newly active item lights up
+    }catch(e){
+      stream.innerHTML='<div class="msg j"><div class="who">'+botName()+'</div>Не удалось открыть историю.</div>';
+    }
+  }
   function addMsg(t,who){const el=document.createElement("div");el.className="msg "+(who==="u"?"u":"j");el.innerHTML=`<div class="who">${who==="u"?"Вы":botName()}</div>`+t.replace(/</g,"&lt;");$("stream").appendChild(el);$("stream").scrollTop=$("stream").scrollHeight;return el;}
   async function sendMsg(){const q=$("q").value.trim();if(!q)return;$("q").value="";addMsg(q,"u");pulse();const th=addMsg("…","j");
     if(!CFG.api){th.innerHTML='<div class="who">'+botName()+'</div>Подключите бэкенд в Настройках → Подключение, сэр. (Демо.)';return;}
-    try{const r=await fetch(CFG.api+"/chat",{method:"POST",headers:{"Content-Type":"application/json",...authH()},body:JSON.stringify({message:q,session_id:"dashboard"})});const j=await r.json();th.innerHTML='<div class="who">'+botName()+'</div>'+(j.reply||"—").replace(/</g,"&lt;");}catch(e){th.innerHTML='<div class="who">'+botName()+'</div>Сбой соединения, сэр.';}}
+    try{const r=await fetch(CFG.api+"/chat",{method:"POST",headers:{"Content-Type":"application/json",...authH()},body:JSON.stringify({message:q,session_id:ACTIVE_SESSION})});const j=await r.json();th.innerHTML='<div class="who">'+botName()+'</div>'+(j.reply||"—").replace(/</g,"&lt;");}catch(e){th.innerHTML='<div class="who">'+botName()+'</div>Сбой соединения, сэр.';}}
   // ---- MCP: external tool servers, managed in the app config -------------
   // The list of servers lives in the app config and is edited through the
   // native bridge; the engine picks it up on the next rebuild. Live status

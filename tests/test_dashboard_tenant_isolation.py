@@ -165,6 +165,38 @@ def test_sessions_list_shows_only_the_callers_own_conversations(tmp_path):
         assert not any("alice" in s["session_id"] for s in bob_sessions)
 
 
+def test_session_messages_are_readable_by_their_own_owner(tmp_path):
+    """Этап 2 / Фаза B6 — the endpoint clicking a history entry calls."""
+    engine, app, _settings = _tenant_app(tmp_path)
+    asyncio.run(engine.memory.persist_turn(
+        "user:alice::default", "hi from alice", "hello alice"))
+    with TestClient(app) as client:
+        alice = _account(client, "alice", "wonderland1")
+        session_id = client.get("/dashboard/sessions",
+                                headers=alice).json()["sessions"][0]["session_id"]
+
+        r = client.get(f"/dashboard/sessions/{session_id}/messages", headers=alice)
+        assert r.status_code == 200, r.text
+        contents = [m["content"] for m in r.json()["messages"]]
+        assert "hi from alice" in contents
+        assert "hello alice" in contents
+
+
+def test_session_messages_are_hidden_from_another_account(tmp_path):
+    engine, app, _settings = _tenant_app(tmp_path)
+    asyncio.run(engine.memory.persist_turn(
+        "user:alice::default", "alice's secret question", "alice's secret answer"))
+    with TestClient(app) as client:
+        alice = _account(client, "alice", "wonderland1")
+        bob = _account(client, "bob", "thebuilder1")
+        session_id = client.get("/dashboard/sessions",
+                                headers=alice).json()["sessions"][0]["session_id"]
+
+        # Bob guesses (or is shown) Alice's real session_id and tries it.
+        r = client.get(f"/dashboard/sessions/{session_id}/messages", headers=bob)
+        assert r.status_code == 404
+
+
 def test_a_username_cannot_widen_its_own_scope_with_like_wildcards(tmp_path):
     # "ali" is a real account; "ali%" would, if the % were not escaped in the
     # LIKE pattern, match "ali" too and everyone whose name starts with it.
@@ -256,3 +288,25 @@ def test_single_tenant_deployment_is_unaffected(tmp_path):
     with TestClient(app) as client:
         view = client.get("/dashboard/memory").json()
         assert any(i["content"] == "the only user's note" for i in view["items"])
+
+
+def test_single_tenant_session_messages_are_readable_without_a_prefix(tmp_path):
+    """Same passthrough as memory above, for the new session-messages
+    endpoint (Этап 2 / Фаза B6) — a bare session id with no principal
+    prefix must still be readable in the local/self-hosted case."""
+    settings = Settings(
+        anthropic_api_key="k", log_file="", memory_enabled=True,
+        memory_backend="sqlite", memory_db_path=str(tmp_path / "m.db"),
+        embedding_backend="hashing",
+        integrations_enabled=False, goals_enabled=False,
+        rate_limit_enabled=False, api_key="",
+    )
+    engine = JarvisEngine(container=ServiceContainer(
+        settings, llm_client=LLMClient(primary=FakeProvider())))
+    app = create_app(engine=engine, settings=settings)
+    asyncio.run(engine.memory.persist_turn("default", "hello", "hi there"))
+    with TestClient(app) as client:
+        r = client.get("/dashboard/sessions/default/messages")
+        assert r.status_code == 200, r.text
+        contents = [m["content"] for m in r.json()["messages"]]
+        assert "hello" in contents and "hi there" in contents

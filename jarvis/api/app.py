@@ -631,6 +631,35 @@ def create_app(engine: JarvisEngine | None = None,
             session_prefix=_tenant_prefix(principal))
         return {"sessions": rows}
 
+    @app.get("/dashboard/sessions/{session_id}/messages")
+    async def dashboard_session_messages(
+            session_id: str,
+            principal: str = Depends(require_principal)) -> dict:
+        """One past conversation's messages, for reopening it in the chat
+        view (Этап 2 / Фаза B6) — /dashboard/sessions only ever returned the
+        summary list (title/count/last_ts), never a way to see what was
+        actually said.
+
+        ``session_id`` is caller-supplied, so it is checked against the
+        caller's own tenant prefix before anything is loaded — the same
+        "don't confirm which" 404 every other cross-tenant probe in this
+        file gets, rather than a permission error that would out a real id
+        belonging to someone else.
+        """
+        mem = getattr(engine, "memory", None)
+        if mem is None or getattr(mem, "conversations", None) is None:
+            return {"messages": []}
+        prefix = _tenant_prefix(principal)
+        if prefix is not None and not session_id.startswith(prefix):
+            raise HTTPException(status_code=404, detail="No such session.")
+        import asyncio as _a
+        convo = await _a.to_thread(mem.conversations.load, session_id, limit=200)
+        return {"messages": [
+            {"role": m.role.value, "content": m.content,
+            "timestamp": m.timestamp.timestamp()}
+            for m in convo.messages
+        ]}
+
     def _broker():
         """The engine's confirmation broker, when it has one."""
         return getattr(engine.security, "confirmer", None)
