@@ -154,3 +154,116 @@ def test_the_api_keys_screen_shows_todays_usage():
     assert "apikeys.usage" in html
     assert "usageCard" in html
     assert "Использование сегодня" in html
+
+
+# -- the Device Manager panel (Этап 2 / Фаза A4 backend, B4 UI) -------------
+
+
+def test_the_deck_has_a_devices_screen_between_plan_and_apikeys():
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert 'id="view-devices"' in html
+    assert 'data-view="devices"' in html
+    # Same nav-item/section/load-function convention as every other screen —
+    # not a bespoke pattern (see desktop.html's own audit-derived docstring).
+    for action in ("devices.list", "devices.revoke"):
+        assert action in html
+    assert "loadDevices" in html and "renderDevices" in html
+    # Placed between "plan" and "apikeys" in the rail, as the plan calls for.
+    plan_idx = html.index('data-view="plan"')
+    devices_idx = html.index('data-view="devices"')
+    apikeys_idx = html.index('data-view="apikeys"')
+    assert plan_idx < devices_idx < apikeys_idx
+
+
+def test_devices_screen_is_not_gated_by_a_paid_tier():
+    """Session management is basic account security, not a paid feature —
+    unlike apikeys, it must not appear in the entitlement-lock map."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    lock_map = html.split("PLAN_FEATURE_FOR_VIEW")[1].split("}")[0]
+    assert "devices:" not in lock_map
+
+
+def test_devices_screen_marks_the_current_device_and_confirms_before_self_logout():
+    """Revoking your own live session needs an explicit yes — the same
+    confirm() guard the deck already uses for forgetAll()/settings.reset."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert "current_device_id" in html
+    revoke_fn = html.split("async function revokeDevice")[1].split("\n\n")[0]
+    assert "confirm(" in revoke_fn
+    assert "isCurrent" in revoke_fn
+
+
+# -- the profile screen: identity + password change (Этап 2 / Фаза B5) ------
+
+
+def test_the_profile_screen_shows_real_identity_from_the_plan():
+    """It used to be a static "Sir / Pro / Владелец" card — identity now
+    comes from PLAN (plan.get), the same source of truth the Plan screen
+    already uses, not invented markup."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert 'id="view-profile"' in html
+    assert "loadProfile" in html and "renderProfile" in html
+    render_fn = html.split("function renderProfile")[1].split("function ")[0]
+    assert "PLAN.username" in render_fn
+    assert "PLAN.owner" in render_fn
+
+
+def test_the_profile_screen_has_a_working_password_change_form():
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert "account.change_password" in html
+    assert 'id="pwCurrent"' in html and 'id="pwNew"' in html and 'id="pwNew2"' in html
+    change_fn = html.split("async function changePassword")[1].split("\n\n")[0]
+    # New password confirmation is checked client-side before ever calling
+    # the bridge — the server also enforces it, but failing fast is kinder.
+    assert "n1!==n2" in change_fn or "n1 !== n2" in change_fn
+
+
+def test_the_password_form_is_hidden_without_a_server_account():
+    """Open/shared-key mode (no accounts) has no password to change."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    render_fn = html.split("function renderProfile")[1].split("function ")[0]
+    assert "canChangePassword" in render_fn
+    assert "PLAN.username" in render_fn.split("canChangePassword")[1].split(";")[0]
+
+
+# -- clickable chat history (Этап 2 / Фаза B6) -------------------------------
+
+
+def test_history_items_carry_their_session_id():
+    """groupByDay used to drop session_id on the floor — a history entry is
+    a chat with a different session_id, so the id has to survive into what
+    renderHist draws."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    group_fn = html.split("function groupByDay")[1].split("function ")[0]
+    assert "r.session_id" in group_fn
+
+
+def test_history_items_are_clickable_and_open_the_session():
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert "openHistorySession" in html
+    render_fn = html.split("function renderHist")[1].split("function ")[0]
+    assert "onclick=" in render_fn and "openHistorySession" in render_fn
+
+
+def test_opening_history_fetches_that_sessions_messages():
+    html = DESKTOP.read_text(encoding="utf-8")
+    open_fn = html.split("async function openHistorySession")[1].split("\n  }")[0]
+    assert "/dashboard/sessions/" in open_fn and "/messages" in open_fn
+
+
+def test_reopening_a_session_redirects_new_messages_to_it():
+    """The composer must stop talking to the fixed 'dashboard' session once
+    a real history entry is open — otherwise 'reopening' would only be a
+    read-only history view, not the chat continuing where it left off."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    send_fn = html.split("async function sendMsg")[1].split("function ")[0]
+    assert "ACTIVE_SESSION" in send_fn
+    assert 'session_id:"dashboard"' not in send_fn
+
+
+def test_new_chat_returns_to_the_default_session():
+    """Otherwise a fresh 'Новый чат' after browsing history would keep
+    appending to whatever old session was last opened."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    new_chat_fn = html.split("function newChat")[1].split("\n  }")[0]
+    assert "DEFAULT_SESSION" in new_chat_fn

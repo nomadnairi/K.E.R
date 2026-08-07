@@ -53,14 +53,28 @@ class InMemoryVectorStore(BaseMemoryStore):
 
     # -- read ---------------------------------------------------------------
 
+    def _matches(self, session_id: str, *, wanted: str | None,
+                prefix: str | None) -> bool:
+        """Whether one entry's session belongs to what a caller asked for.
+
+        ``prefix`` (a tenant's own namespace, e.g. ``"user:alice::"``) wins
+        when given — an exact ``session_id`` is only used when there is
+        nothing to scope against (see ``jarvis.api.app._tenant_prefix``).
+        """
+        if prefix is not None:
+            return session_id.startswith(prefix)
+        return wanted is None or session_id == wanted
+
     def recall(self, query: str, *, session_id: str | None = "default",
+            session_prefix: str | None = None,
             limit: int = 5) -> list[MemoryRecord]:
         if not self._entries:
             return []
         q = self.embedder.embed(query)
         scored: list[MemoryRecord] = []
         for entry in self._entries:
-            if session_id is not None and entry.record.session_id != session_id:
+            if not self._matches(entry.record.session_id, wanted=session_id,
+                                prefix=session_prefix):
                 continue
             score = cosine_similarity(q, entry.embedding)
             if score <= self.min_score:
@@ -73,19 +87,26 @@ class InMemoryVectorStore(BaseMemoryStore):
 
     # -- delete -------------------------------------------------------------
 
-    def forget(self, session_id: str | None = "default") -> None:
-        if session_id is None:
+    def forget(self, session_id: str | None = "default", *,
+            session_prefix: str | None = None) -> None:
+        if session_prefix is None and session_id is None:
             self._entries.clear()
         else:
             self._entries = [
-                e for e in self._entries if e.record.session_id != session_id
+                e for e in self._entries
+                if not self._matches(e.record.session_id, wanted=session_id,
+                                    prefix=session_prefix)
             ]
         self._save()
 
-    def delete(self, record_id: int) -> bool:
+    def delete(self, record_id: int, *, session_prefix: str | None = None) -> bool:
         before = len(self._entries)
-        self._entries = [e for e in self._entries
-                        if e.record.record_id != record_id]
+        self._entries = [
+            e for e in self._entries
+            if not (e.record.record_id == record_id
+                    and (session_prefix is None
+                        or e.record.session_id.startswith(session_prefix)))
+        ]
         if len(self._entries) == before:
             return False
         self._save()
@@ -93,11 +114,13 @@ class InMemoryVectorStore(BaseMemoryStore):
 
     # -- introspection ------------------------------------------------------
 
-    def browse(self, *, session_id: str | None = None, limit: int = 100,
+    def browse(self, *, session_id: str | None = None,
+            session_prefix: str | None = None, limit: int = 100,
             offset: int = 0) -> list[MemoryRecord]:
         """Stored memories, newest first."""
         picked = [e.record for e in self._entries
-                if session_id is None or e.record.session_id == session_id]
+                if self._matches(e.record.session_id, wanted=session_id,
+                                prefix=session_prefix)]
         picked.reverse()
         offset = max(0, int(offset))
         return picked[offset:offset + max(1, min(int(limit), 500))]
@@ -105,10 +128,13 @@ class InMemoryVectorStore(BaseMemoryStore):
     def can_browse(self) -> bool:
         return True
 
-    def count(self, session_id: str | None = None) -> int:
-        if session_id is None:
+    def count(self, session_id: str | None = None, *,
+            session_prefix: str | None = None) -> int:
+        if session_prefix is None and session_id is None:
             return len(self._entries)
-        return sum(1 for e in self._entries if e.record.session_id == session_id)
+        return sum(1 for e in self._entries
+                if self._matches(e.record.session_id, wanted=session_id,
+                                prefix=session_prefix))
 
     # -- persistence --------------------------------------------------------
 

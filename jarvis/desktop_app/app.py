@@ -36,6 +36,24 @@ _FALLBACK_ADMIN_TABS = ("assistant", "capabilities", "integrations", "memory",
                         "general", "logs")
 
 
+def _device_meta(config: AppConfig) -> dict:
+    """This install's device fields for a login call (Этап 2 / Фаза B1).
+
+    Mirrors :meth:`jarvis.desktop_app.bridge.Bridge._device_meta` — the
+    native fallback login screen below talks to the API directly instead of
+    through the bridge, but a device signing in this way is exactly as real
+    as one signing in through the deck and deserves to show up the same way
+    in the account's Device Manager.
+    """
+    import platform as _platform
+    return {
+        "device_id": config.ensure_device_id(),
+        "device_name": _platform.node(),
+        "platform": _platform.system(),
+        "client_type": "desktop",
+    }
+
+
 def visible_tabs(role: str, *, webview: bool = True) -> tuple[str, ...]:
     """Ordered tab ids to show.
 
@@ -123,6 +141,48 @@ _MAX_RENDER = 150   # messages painted into the transcript widget
 _MAX_STORE = 400    # messages kept in memory
 
 
+def _boot_splash(theme: str):
+    """A themed :class:`QSplashScreen` for the boot sequence (Фаза B3).
+
+    Drawn, not shipped as an image asset — same reasoning as
+    :meth:`MainWindow._tray_icon`'s drawn fallback: it stays crisp at any
+    DPI and needs no file to go missing. Returns ``(None, no-op)`` if Qt
+    can't give us a splash for some reason (headless test runner, odd
+    platform) — every call site treats a ``None`` splash as "no boot UI",
+    not an error, since a boot sequence is a nicety, the window still comes
+    up either way.
+    """
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
+        from PySide6.QtWidgets import QSplashScreen
+
+        from jarvis.desktop_app.theme import THEMES, DEFAULT_THEME
+        palette = THEMES.get(theme, THEMES[DEFAULT_THEME])
+
+        width, height = 420, 240
+        pix = QPixmap(width, height)
+        pix.fill(QColor(palette["bg"]))
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QColor(palette["accent"]))
+        painter.setFont(QFont("Segoe UI", 28, QFont.Weight.Bold))
+        painter.drawText(pix.rect().adjusted(0, -30, 0, -30),
+                        Qt.AlignmentFlag.AlignCenter, "K.E.R.")
+        painter.end()
+
+        splash = QSplashScreen(pix)
+        align = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom
+        color = QColor(palette.get("text", "#f0f5ee"))
+
+        def update(text: str) -> None:
+            splash.showMessage(f"  {text}", align, color)
+
+        return splash, update
+    except Exception:  # noqa: BLE001 - a boot splash is a nicety, not a gate
+        return None, lambda _text: None
+
+
 def run_app() -> int:
     """Create the Qt application and run the main loop."""
     try:
@@ -158,7 +218,8 @@ def run_app() -> int:
         done = Signal(str, str)  # reply, error
         chunk = Signal(str)      # one streamed piece of the reply
         voice = Signal(str, str, str, str)  # transcript, reply, audio_path, error
-        update_ready = Signal(bool, str, str, bool)  # available, latest, url, explicit
+        update_ready = Signal(bool, str, str, str, bool)  # available, latest, url, sha256_url, explicit
+        proactive = Signal(str)  # a message KER sent unprompted (local mode only)
 
     # -- login dialog ---------------------------------------------------------
 
@@ -228,7 +289,7 @@ def run_app() -> int:
                 return
             client = JarvisApiClient(self.server.text().strip())
             try:
-                client.login_with_telegram_code(code.strip())
+                client.login_with_telegram_code(code.strip(), **_device_meta(config))
             except ApiError as exc:
                 QMessageBox.warning(self, tr("login_title", loc),
                                     tr("login_failed", loc, error=exc.detail))
@@ -247,7 +308,8 @@ def run_app() -> int:
             loc = config.language
             client = JarvisApiClient(self.server.text().strip())
             try:
-                client.login(self.user.text().strip(), self.password.text())
+                client.login(self.user.text().strip(), self.password.text(),
+                            **_device_meta(config))
             except ApiError as exc:
                 QMessageBox.warning(self, tr("login_title", loc),
                                     tr("login_failed", loc, error=exc.detail))
@@ -269,11 +331,15 @@ def run_app() -> int:
             super().__init__()
             self.client = client
             self.engine_thread = None
+            from jarvis.desktop_app.notifications import NotificationCenter
+            self.notifications = NotificationCenter(NotificationCenter.default_path())
             self.bridge = ReplyBridge()
             self.bridge.done.connect(self._on_reply)
             self.bridge.chunk.connect(self._on_chunk)
             self.bridge.update_ready.connect(self._on_update)
+            self.bridge.proactive.connect(self._on_proactive)
             self._streaming = False
+            self._proactive_future = None
             loc = config.language
 
             self.setWindowTitle(tr("app_title", loc))
@@ -400,12 +466,12 @@ def run_app() -> int:
                     include_prerelease=(config.update_channel != "stable"))
                 self.bridge.update_ready.emit(info.available, info.latest,
                                             info.download_url or info.url,
-                                            explicit)
+                                            info.sha256_url, explicit)
 
             threading.Thread(target=_work, daemon=True).start()
 
         def _on_update(self, available: bool, latest: str, url: str,
-                    explicit: bool) -> None:
+                    sha256_url: str, explicit: bool) -> None:
             from PySide6.QtWidgets import QMessageBox
             if not available:
                 if explicit:
@@ -414,25 +480,34 @@ def run_app() -> int:
                 return
             # Auto-update (opt-in): apply straight away; otherwise ask.
             if config.auto_update and url:
-                self._apply_update(url, latest)
+                self._apply_update(url, sha256_url, latest)
                 return
             ans = QMessageBox.question(
                 self, "Доступно обновление",
                 f"Вышла версия {latest}. Установить сейчас?")
             if ans == QMessageBox.StandardButton.Yes and url:
-                self._apply_update(url, latest)
+                self._apply_update(url, sha256_url, latest)
 
-        def _apply_update(self, url: str, latest: str = "") -> None:
-            """Download the Windows installer and launch it silently, then quit.
+        def _apply_update(self, url: str, sha256_url: str = "", latest: str = "") -> None:
+            """Download the Windows installer, verify its SHA-256, then launch it.
 
-            On non-Windows or for a non-installer URL, just open the download.
+            The installer never runs unless it hashes to the checksum published
+            alongside it in the GitHub release — a compromised or truncated
+            download (or a tampered mirror) is refused, not executed. On
+            non-Windows, a non-installer URL, or a missing/failed checksum, we
+            fall back to just opening the page for the user to handle manually.
             """
             import sys
             import tempfile
             import webbrowser
             from pathlib import Path
 
-            from jarvis.core.updater import download
+            from jarvis.core.updater import (
+                download,
+                fetch_checksum_text,
+                parse_sha256_text,
+                verify_sha256,
+            )
             if sys.platform != "win32" or not url.lower().endswith(".exe"):
                 webbrowser.open(url)
                 return
@@ -442,6 +517,22 @@ def run_app() -> int:
             except Exception:  # noqa: BLE001 - fall back to the browser
                 webbrowser.open(url)
                 return
+
+            try:
+                if not sha256_url:
+                    raise ValueError("no checksum published for this release")
+                expected = parse_sha256_text(fetch_checksum_text(sha256_url))
+                if not verify_sha256(str(dest), expected):
+                    raise ValueError("downloaded installer does not match its checksum")
+            except Exception as exc:  # noqa: BLE001 - fail closed, never run unverified
+                logger.warning("Update integrity check failed, refusing to run installer: %s", exc)
+                try:
+                    dest.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                webbrowser.open(url)
+                return
+
             import subprocess
             try:
                 # Inno Setup silent install; it replaces files after we exit.
@@ -505,6 +596,37 @@ def run_app() -> int:
                 self._local_api = self.engine_thread.start_api()
             except Exception:  # noqa: BLE001 - deck falls back to demo mode
                 self._local_api = None
+            self._start_proactive()
+
+        def _start_proactive(self) -> None:
+            """Local mode only: let KER notice things and speak up unprompted.
+
+            Runs on the same engine loop EngineThread already owns
+            (`EngineThread.submit`, the exact pattern `start_api()` uses for
+            uvicorn) -- no new thread. Delivery hops back to the GUI thread
+            via `self.bridge.proactive`, the same cross-thread pattern every
+            other engine-thread callback here already uses.
+            """
+            if (config.mode != "local" or not config.proactive_enabled
+                    or self.engine_thread is None):
+                return
+            from jarvis.proactive.engine import ProactiveEngine
+            from jarvis.desktop_app.proactive_prefs import LocalProactivePrefs
+
+            prefs = LocalProactivePrefs(config)
+            proactive_engine = ProactiveEngine(
+                self.engine_thread.engine, prefs, self.engine_thread.engine.settings)
+
+            async def _send(chat_id: str, text: str) -> None:
+                self.bridge.proactive.emit(text)
+
+            self._proactive_future = self.engine_thread.submit(
+                proactive_engine.run(_send))
+
+        def _stop_proactive(self) -> None:
+            if self._proactive_future is not None:
+                self._proactive_future.cancel()
+                self._proactive_future = None
 
         #: Saving one of these changes what the engine *is*, so it is rebuilt.
         ENGINE_FIELDS = frozenset({
@@ -544,9 +666,14 @@ def run_app() -> int:
                     logger.warning("Autostart update failed: %s", exc)
             if config.mode == "local" and (changed & self.ENGINE_FIELDS):
                 self._restart_engine()
+            elif config.mode == "local" and "proactive_enabled" in changed:
+                # A lightweight on/off -- doesn't need a full engine rebuild.
+                self._stop_proactive()
+                self._start_proactive()
 
         def _restart_engine(self) -> None:
             """Rebuild the engine so new settings are actually in force."""
+            self._stop_proactive()
             old = self.engine_thread
             self.engine_thread = None
             self.voice_controller = None
@@ -875,6 +1002,42 @@ def run_app() -> int:
             if not error:
                 last = self._messages[-1][1] if self._messages else ""
                 self._notify(reply or last)
+
+        def _push_notification(self, text: str, *, kind: str = "info") -> None:
+            """Single entry point for anything the user should hear about
+            unprompted: proactive messages today, update availability and
+            future AI Runtime events (agent started, goal finished, ...)
+            tomorrow — all through the same channel instead of a new ad hoc
+            mechanism each time.
+
+            Writes to the :class:`NotificationCenter` first — the toast
+            (WebView deck, or the OS tray) is a side effect of that record,
+            not the record itself, so nothing is lost if the window is
+            hidden or the page hasn't finished loading yet.
+            """
+            self.notifications.add(text, kind=kind)
+            view = getattr(self, "_deck_view", None)
+            if view is not None:
+                import json
+                view.page().runJavaScript(f"toast({json.dumps(text)})")
+            self._notify(text)
+
+        def _on_proactive(self, text: str) -> None:
+            """A message KER sent unprompted (local mode's ProactiveEngine).
+
+            Runs on the GUI thread (Qt marshals the cross-thread emit safely,
+            same as every other bridge signal here). ``self.transcript``
+            only exists in the native fallback build (no QtWebEngine) — the
+            deck/WebView build has no such widget, and touching it
+            unconditionally used to raise ``AttributeError`` inside this Qt
+            slot, which Qt swallows silently: proactive messages never
+            showed up anywhere in the shipped (WebView) build. Guarded the
+            same way :meth:`_append_system` already guards it.
+            """
+            if hasattr(self, "transcript"):
+                self._messages.append(("assistant", text))
+                self._render_chat()
+            self._push_notification(text, kind="proactive")
 
         # -- voice tab -----------------------------------------------------
 
@@ -1370,6 +1533,7 @@ def run_app() -> int:
                 self.tray.showMessage(
                     "KER", tr("tray_running", config.language))
                 return
+            self._stop_proactive()
             if self.engine_thread is not None:
                 self.engine_thread.stop()
             if self.tray is not None:
@@ -1427,6 +1591,22 @@ def run_app() -> int:
         from PySide6.QtGui import QIcon
         app.setWindowIcon(QIcon(str(_icon)))
 
+    # Boot sequence (Этап 2 / Фаза B3): before this, the window between
+    # QApplication([]) and window.show() was a blank OS rectangle for as
+    # long as local-mode engine startup took (up to 30s, see
+    # EngineThread.start()) — no spinner, no text, nothing. AppStatus wraps
+    # the existing steps below with a visible stage each; it does not
+    # reorder or change any of them.
+    from jarvis.desktop_app.status import AppStatus, Stage
+    status = AppStatus()
+    splash, _splash_update = _boot_splash(config.theme)
+    if splash is not None:
+        status.on_change(lambda _stage, text: (_splash_update(text),
+                                            app.processEvents()))
+        splash.show()
+        status.set(Stage.CONNECTING)
+        app.processEvents()
+
     #: Filled in once the window exists, so saves made from the interface
     #: reach the app that has to act on them.
     window_ref: dict = {}
@@ -1467,8 +1647,14 @@ def run_app() -> int:
                             exc.detail)
                 client = candidate
                 bridge.client = candidate
+                if splash is not None:
+                    status.set(Stage.DEGRADED)
 
     if client is None:
+        # A modal sign-in dialog is about to take over the screen — the
+        # splash would just sit uselessly behind it.
+        if splash is not None:
+            splash.hide()
         if handler is not None:
             login = WebLoginWindow(handler)
             if login.exec() != QDialog.DialogCode.Accepted:
@@ -1479,10 +1665,23 @@ def run_app() -> int:
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return 0
             client = dialog.client
+        if splash is not None:
+            splash.show()
     config.mode = config.resolved_mode()
+
+    # Local mode runs the whole engine inside MainWindow's constructor,
+    # synchronously, on this same GUI thread (up to 30s cold —
+    # EngineThread.start()) — the one step in this sequence a splash text
+    # update actually has time to be seen for.
+    if splash is not None and config.mode == "local":
+        status.set(Stage.STARTING_ENGINE)
 
     window = MainWindow(client)
     window_ref["window"] = window
+    if splash is not None:
+        status.set(Stage.SYNCING)
+        status.set(Stage.READY)
+        splash.finish(window)
     window.show()
     window.maybe_onboard()
     return app.exec()

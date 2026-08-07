@@ -274,6 +274,142 @@ def test_a_taken_username_is_a_conflict_not_a_silent_takeover():
                         ).status_code == 200
 
 
+# -- change password (Этап 2 / Фаза B5) --------------------------------------
+#
+# change_password() on LicenseService already existed and overwrites
+# blindly — fine for the bot (already proved control of the Telegram
+# account) and the admin CLI (has the admin key), but a person who only
+# holds a bearer token needs the current password re-checked first, so a
+# session left open on someone else's machine can't take over the login.
+
+
+def test_change_password_requires_the_current_one():
+    with TestClient(_app()) as client:
+        _seed(client)
+        token = client.post("/auth/login",
+                            json={"username": "tony", "password": "arcreactor"}
+                            ).json()["token"]
+        r = client.post("/auth/change-password",
+                        json={"current_password": "wrong", "new_password": "newpassword1"},
+                        headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 401
+        # The old password still works — nothing was changed.
+        assert client.post("/auth/login",
+                        json={"username": "tony", "password": "arcreactor"}
+                        ).status_code == 200
+
+
+def test_change_password_succeeds_and_the_new_password_signs_in():
+    with TestClient(_app()) as client:
+        _seed(client)
+        token = client.post("/auth/login",
+                            json={"username": "tony", "password": "arcreactor"}
+                            ).json()["token"]
+        r = client.post("/auth/change-password",
+                        json={"current_password": "arcreactor",
+                            "new_password": "newpassword1"},
+                        headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200, r.text
+
+        assert client.post("/auth/login",
+                        json={"username": "tony", "password": "newpassword1"}
+                        ).status_code == 200
+        # The old password no longer works.
+        assert client.post("/auth/login",
+                        json={"username": "tony", "password": "arcreactor"}
+                        ).status_code == 401
+
+
+def test_change_password_refuses_a_short_new_password():
+    with TestClient(_app(auth_min_password_length=12)) as client:
+        _seed(client)
+        token = client.post("/auth/login",
+                            json={"username": "tony", "password": "arcreactor"}
+                            ).json()["token"]
+        r = client.post("/auth/change-password",
+                        json={"current_password": "arcreactor", "new_password": "short"},
+                        headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 400
+        assert "12" in r.json()["detail"]
+
+
+def test_change_password_requires_a_valid_session():
+    with TestClient(_app()) as client:
+        r = client.post("/auth/change-password",
+                        json={"current_password": "x", "new_password": "newpassword1"})
+        assert r.status_code == 401
+
+
+# -- device metadata (Этап 2 / Фаза B1) --------------------------------------
+#
+# LoginIn/_TgLoginIn grew optional device_id/device_name/platform/client_type
+# fields so the account's Device Manager (A4's /dashboard/devices) can show
+# what's actually signed in. These prove both halves: a client that sends
+# nothing behaves exactly as before, and one that does gets it recorded.
+
+
+def test_login_without_device_fields_is_unaffected():
+    """Every pre-existing caller (the bot, old exe builds) sends no device
+    fields at all — the old, bare request body must keep working."""
+    with TestClient(_app()) as client:
+        _seed(client)
+        r = client.post("/auth/login",
+                        json={"username": "tony", "password": "arcreactor"})
+        assert r.status_code == 200, r.text
+
+
+def test_login_with_device_fields_is_recorded_for_the_device_manager():
+    with TestClient(_app()) as client:
+        _seed(client)
+        r = client.post("/auth/login", json={
+            "username": "tony", "password": "arcreactor",
+            "device_id": "desk-1", "device_name": "Tony's PC",
+            "platform": "Windows", "client_type": "desktop",
+        })
+        assert r.status_code == 200, r.text
+
+        svc = client.app.state.license_service
+        acc = svc.get_account("tony")
+        sessions = svc.list_sessions(acc.id)
+        assert len(sessions) == 1
+        assert sessions[0]["device_id"] == "desk-1"
+        assert sessions[0]["device_name"] == "Tony's PC"
+        assert sessions[0]["platform"] == "Windows"
+        assert sessions[0]["client_type"] == "desktop"
+
+
+def test_register_with_device_fields_is_recorded():
+    with TestClient(_app(auth_allow_signup=True)) as client:
+        r = client.post("/auth/register", json={
+            "username": "newbie", "password": "hunter22",
+            "device_id": "phone-9", "platform": "Android",
+            "client_type": "mobile",
+        })
+        assert r.status_code == 200, r.text
+
+        svc = client.app.state.license_service
+        acc = svc.get_account("newbie")
+        sessions = svc.list_sessions(acc.id)
+        assert sessions[0]["device_id"] == "phone-9"
+        assert sessions[0]["client_type"] == "mobile"
+
+
+def test_telegram_login_with_device_fields_is_recorded():
+    with TestClient(_app()) as client:
+        code = client.app.state.license_service.create_telegram_login_code(555)
+        r = client.post("/auth/telegram", json={
+            "code": code, "device_id": "laptop-2", "device_name": "Work laptop",
+            "platform": "Linux", "client_type": "desktop",
+        })
+        assert r.status_code == 200, r.text
+
+        svc = client.app.state.license_service
+        acc = svc.get_account(r.json()["username"])
+        sessions = svc.list_sessions(acc.id)
+        assert sessions[0]["device_id"] == "laptop-2"
+        assert sessions[0]["device_name"] == "Work laptop"
+
+
 # -- the server describes itself --------------------------------------------
 
 def test_the_root_endpoint_says_how_one_gets_in():

@@ -63,9 +63,17 @@ about you so it can bring them up later. Pasted passwords, tokens and card
 numbers are stripped out before anything is ever stored.
 
 **Actually do things.** The model doesn't just answer — it can call tools:
-search the web, read and write files, run shell commands, control the desktop,
-check the weather, talk to your smart home. Dangerous powers are off by default
-and switched on one at a time.
+search the web, read and write files, run shell commands, control the
+desktop, check the weather, talk to your smart home. Desktop control works
+even through the hosted bot, not just the local app — a small local helper
+relays the click/keystroke/URL to your own machine, never the server.
+Dangerous powers are off by default and switched on one at a time.
+
+**Can see your screen.** Turn on screen sharing — just ask, no menu digging
+— and it looks at what's actually open: explain a piece of code, describe a
+window, walk you through a dialog. One snapshot per message, not a live
+video feed — the same idea as sharing your screen on a call, minus the
+constant stream.
 
 **Plug in more tools (MCP).** KER speaks the Model Context Protocol, so any MCP
 server's tools show up as native skills the assistant can use. Point it at a
@@ -137,7 +145,8 @@ person separately, answers by voice, and has subscription tiers (Free / Plus /
 Pro) that unlock the premium features and higher limits.
 
 Settings live in tidy nested menus: language, the assistant's name, your AI
-model, memory, voice, integrations and more.
+model, memory, voice, integrations and more. Invite friends with your
+referral link from the bot's menu and you both get extra daily messages.
 
 ---
 
@@ -154,10 +163,13 @@ Signing in happens in that same design: a **username and password**, or a
 operator included — their account simply unlocks everything.
 
 What you see afterwards follows your subscription. Free talks and remembers;
-Plus adds web search, voice, every model and images; Pro adds the powers that
-only exist where the engine runs on your own machine — files, shell, desktop
-control, MCP servers and local models. Sections your plan doesn't include stay
-visible with what would unlock them, rather than quietly disappearing.
+Plus adds web search, voice, every model and images; Pro adds files, shell
+access, MCP servers and local models — powers that only exist where the
+engine itself runs on your machine. Desktop control and screen sharing are
+the exception: they work from the hosted bot too, through a small local
+helper that keeps the actual click/keystroke/screenshot on your own PC,
+never the server. Sections your plan doesn't include stay visible with what
+would unlock them, rather than quietly disappearing.
 
 The settings in that window are the real thing — language, theme, the
 assistant's name, provider and API keys, PC capabilities, voice backends,

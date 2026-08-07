@@ -80,6 +80,9 @@ class Settings(BaseSettings):
 
     #: Max agentic tool-calling rounds before returning to the user.
     max_tool_rounds: int = Field(default=5, gt=0, le=20)
+    #: Same, but for voice-originated turns (Request.source == "voice") —
+    #: fewer round trips keeps a spoken reply from taking a minute or more.
+    voice_max_tool_rounds: int = Field(default=2, gt=0, le=20)
     #: Max concurrent sessions kept in memory (LRU-evicted beyond this).
     max_sessions: int = Field(default=1000, gt=0)
 
@@ -159,6 +162,15 @@ class Settings(BaseSettings):
     tts_voice: str = "alloy"
     #: Local Whisper model size (tiny | base | small | medium | large).
     local_whisper_model: str = "base"
+    #: Hard ceiling on an uploaded voice message, enforced by the API itself —
+    #: never rely on a reverse proxy alone; a bare ``python -m jarvis.api``
+    #: has no proxy in front of it at all. 15 MB comfortably covers a real
+    #: voice note (tens of minutes of compressed opus/webm).
+    voice_stt_max_bytes: int = Field(default=15 * 1024 * 1024, gt=0)
+    #: Hard ceiling on TTS input length, in characters. 4000 mirrors what
+    #: OpenAI's own TTS endpoint accepts — a request past that would fail
+    #: upstream anyway, just after paying for the round trip first.
+    voice_tts_max_chars: int = Field(default=4000, gt=0)
     #: Whether the bot also replies with a spoken (TTS) voice/audio message.
     voice_replies: bool = True
 
@@ -183,6 +195,11 @@ class Settings(BaseSettings):
     confirm_timeout_seconds: float = Field(default=60.0, gt=1.0, le=600.0)
     #: Audit log file for dangerous-capability attempts ("" disables it).
     audit_log_path: str = "logs/audit.log"
+
+    # --- Device relay (server-hosted engine controlling a connected PC) ---
+    #: How long the server waits for a connected device to answer a relayed
+    #: desktop-control call before giving up (e.g. it's asleep/offline).
+    device_relay_timeout_seconds: float = Field(default=30.0, gt=1.0, le=300.0)
 
     # --- Files & coding ---
     #: Expose sandboxed file tools (read on; write gated by security).
@@ -249,6 +266,19 @@ class Settings(BaseSettings):
     #: Serve the interactive OpenAPI docs (/docs, /redoc, /openapi.json). Handy
     #: in development; turn OFF in production so the API surface isn't published.
     api_docs_enabled: bool = True
+    #: Throttle brute-forceable endpoints (login, registration, the Telegram
+    #: code exchange) per client IP. On by default — a login form with no
+    #: rate limit at all is a bigger risk than a false positive here.
+    api_auth_rate_limit_enabled: bool = True
+    #: Attempts allowed per window, per IP, per endpoint.
+    api_auth_rate_limit_capacity: int = Field(default=10, gt=0)
+    api_auth_rate_limit_window_seconds: float = Field(default=60.0, gt=0)
+    #: Trust ``X-Forwarded-For`` for the caller's address instead of the raw
+    #: socket peer. Only turn this on when the API is genuinely reached
+    #: through a reverse proxy that sets the header itself (see
+    #: deploy/nginx) — otherwise any caller can pick its own rate-limit
+    #: bucket (or someone else's) by sending an arbitrary value.
+    api_trust_proxy_headers: bool = False
 
     # --- Accounts & licensing (per-user login for exe/apk clients) ---
     #: Enable username/password accounts + license checks on the API.
@@ -280,6 +310,16 @@ class Settings(BaseSettings):
     auth_token_ttl_hours: int = Field(default=720, gt=0)
     #: Require a linked+verified Telegram account before login succeeds.
     auth_require_telegram: bool = False
+
+    # --- Web dashboard session (browser client) ---
+    # The dashboard signs in with the same Telegram code as the desktop app but
+    # gets an independent session, carried in an httpOnly cookie rather than
+    # localStorage (a token JavaScript can read is stolen by the first XSS).
+    #: Cookie domain. Set to ".ker-ai.online" so one session covers the site
+    #: and the dashboard subdomain; empty = host-only (fine for localhost).
+    session_cookie_domain: str = ""
+    #: Send the cookie over HTTPS only. Turn off ONLY for local development.
+    session_cookie_secure: bool = True
 
     # --- Billing (payments → automatic license issuance) ---
     #: Enable the /buy flow in the bot and the /billing/webhook endpoint.
@@ -356,6 +396,26 @@ class Settings(BaseSettings):
     proactive_morning_hour: int = Field(default=9, ge=0, le=23)
     #: Nudge users who've been quiet for at least this many days (0 disables).
     proactive_idle_days: int = Field(default=3, ge=0)
+
+    # --- Proactive sensors (the bot notices things and speaks up) ---
+    # Separate from the reminders/automations/idle-nudge block above, which is
+    # untouched by this: this is KER *noticing* something (system load, a
+    # smart-home state change, ...) and deciding, via the LLM, whether it's
+    # worth mentioning unprompted. It only ever sends a message -- never
+    # executes an action on its own.
+    #: Master switch for the sensor-based proactive engine.
+    proactive_sensors_enabled: bool = False
+    #: Seconds between sensor-check ticks.
+    proactive_sensor_interval_seconds: int = Field(default=120, ge=30)
+    #: Per-user minimum gap between two sensor-triggered messages.
+    proactive_cooldown_seconds: int = Field(default=1800, ge=60)
+    #: Bound on concurrent per-tick sensor I/O (screenshots/HTTP polls/etc).
+    proactive_max_concurrent: int = Field(default=5, ge=1)
+    proactive_system_health_enabled: bool = True
+    #: System-health sensor thresholds -- a cheap pre-filter, not the send
+    #: decision itself (the LLM still decides whether crossing this matters).
+    proactive_cpu_threshold_pct: int = Field(default=90, ge=1, le=100)
+    proactive_mem_threshold_pct: int = Field(default=90, ge=1, le=100)
 
     # --- Telegram bot ---
     telegram_bot_token: str = Field(default="", description="Bot token from @BotFather.")

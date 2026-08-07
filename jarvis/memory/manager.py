@@ -162,12 +162,14 @@ class MemoryManager:
             kind="exchange",
         )
 
-    async def recall(self, query: str, *, session_id: str = "default",
+    async def recall(self, query: str, *, session_id: str | None = "default",
+                    session_prefix: str | None = None,
                     limit: int | None = None) -> list[MemoryRecord]:
         return await asyncio.to_thread(
             self.vectors.recall,
             query,
             session_id=session_id,
+            session_prefix=session_prefix,
             limit=limit or self.recall_limit,
         )
 
@@ -186,20 +188,27 @@ class MemoryManager:
     # their assistant remembers is a different question, so it has its own way in.
 
     async def browse(self, *, session_id: str | None = None,
+                    session_prefix: str | None = None,
                     limit: int = 100, offset: int = 0) -> list[MemoryRecord]:
         """Stored memories, newest first."""
         return await asyncio.to_thread(
-            self.vectors.browse, session_id=session_id, limit=limit,
-            offset=offset,
+            self.vectors.browse, session_id=session_id,
+            session_prefix=session_prefix, limit=limit, offset=offset,
         )
 
     def can_browse(self) -> bool:
         """Whether this backend can list and delete individual memories."""
         return self.vectors.can_browse()
 
-    async def delete_memory(self, record_id: int) -> bool:
-        """Forget one specific thing."""
-        return await asyncio.to_thread(self.vectors.delete, record_id)
+    async def delete_memory(self, record_id: int, *,
+                            session_prefix: str | None = None) -> bool:
+        """Forget one specific thing.
+
+        With ``session_prefix`` set, only a record within that prefix is
+        actually removed — see :meth:`SQLiteVectorStore.delete`.
+        """
+        return await asyncio.to_thread(
+            self.vectors.delete, record_id, session_prefix=session_prefix)
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -208,9 +217,22 @@ class MemoryManager:
         await asyncio.to_thread(self.vectors.forget, session_id)
         await asyncio.to_thread(self.conversations.clear, session_id)
 
-    def stats(self) -> dict:
+    async def forget_by_prefix(self, session_prefix: str) -> None:
+        """Clear every session under ``session_prefix``.
+
+        One tenant's "everything" on a server that has several, as opposed
+        to :meth:`forget`'s ``None``, which really does mean everyone's.
+        """
+        await asyncio.to_thread(
+            self.vectors.forget, None, session_prefix=session_prefix)
+        await asyncio.to_thread(
+            self.conversations.clear, None, session_prefix=session_prefix)
+
+    def stats(self, *, session_prefix: str | None = None) -> dict:
         return {
-            "memories": self.vectors.count(),
-            "stored_messages": self.conversations.count(),
-            "sessions": len(self.conversations.sessions()),
+            "memories": self.vectors.count(session_prefix=session_prefix),
+            "stored_messages": self.conversations.count(
+                session_prefix=session_prefix),
+            "sessions": len(self.conversations.sessions(
+                session_prefix=session_prefix)),
         }

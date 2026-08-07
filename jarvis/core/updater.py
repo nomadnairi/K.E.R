@@ -11,6 +11,7 @@ launches the Windows installer); this module only decides *whether* and *where*.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import urllib.request
 from dataclasses import dataclass
@@ -49,6 +50,7 @@ class UpdateInfo:
     available: bool
     url: str = ""
     download_url: str = ""
+    sha256_url: str = ""
     notes: str = ""
     channel: str = "github"
     prerelease: bool = False
@@ -57,7 +59,8 @@ class UpdateInfo:
         return {
             "current": self.current, "latest": self.latest,
             "available": self.available, "url": self.url,
-            "download_url": self.download_url, "notes": self.notes[:2000],
+            "download_url": self.download_url, "sha256_url": self.sha256_url,
+            "notes": self.notes[:2000],
             "channel": self.channel, "prerelease": self.prerelease,
         }
 
@@ -97,15 +100,78 @@ def download(url: str, dest: str, *, opener=None, chunk: int = 65536,
     return dest
 
 
-def _pick_asset(assets: list[dict], prefer: str = ".exe") -> str:
+def _pick_asset_dict(assets: list[dict], prefer: str = ".exe") -> dict:
     """Prefer an installer, then any matching-suffix asset, else the first."""
     for a in assets:
         if "setup" in a.get("name", "").lower() and a.get("name", "").endswith(prefer):
-            return a.get("browser_download_url", "")
+            return a
     for a in assets:
         if a.get("name", "").endswith(prefer):
+            return a
+    return assets[0] if assets else {}
+
+
+def _pick_asset(assets: list[dict], prefer: str = ".exe") -> str:
+    """Prefer an installer, then any matching-suffix asset, else the first."""
+    return _pick_asset_dict(assets, prefer).get("browser_download_url", "")
+
+
+def _asset_url_by_name(assets: list[dict], name: str) -> str:
+    """Exact-match lookup, used to find an installer's checksum sibling."""
+    for a in assets:
+        if a.get("name", "") == name:
             return a.get("browser_download_url", "")
-    return assets[0].get("browser_download_url", "") if assets else ""
+    return ""
+
+
+def sha256_of_file(path: str, *, chunk: int = 65536) -> str:
+    """Stream-hash a file on disk. Never reads it whole into memory."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while True:
+            block = fh.read(chunk)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def fetch_checksum_text(url: str, *, opener=None, timeout: int = 10) -> str:
+    """Download a small checksum file and return its raw text.
+
+    Kept separate from parsing so tests can inject arbitrary content without
+    a network stack. ``opener`` is injectable, same convention as
+    :func:`download`.
+    """
+    if not url.startswith("https://"):
+        raise ValueError("Refusing non-https checksum request.")
+    opener = opener or urllib.request.build_opener()
+    req = urllib.request.Request(url, headers={"User-Agent": "jarvis-updater"})
+    with opener.open(req, timeout=timeout) as resp:  # noqa: S310  # nosec B310
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def parse_sha256_text(text: str) -> str:
+    """Extract a 64-hex-char digest from checksum-file text.
+
+    Accepts a bare hex digest (what CI publishes: ``<hex>``) as well as the
+    common ``sha256sum`` two-column format (``<hex>  filename``) some tools
+    produce — the digest is always the first whitespace-separated token.
+    Raises ``ValueError`` if nothing that looks like a SHA-256 digest is found,
+    so a malformed or empty checksum file fails verification instead of
+    silently comparing against an empty string.
+    """
+    token = text.strip().split()[0] if text.strip() else ""
+    if len(token) != 64 or any(c not in "0123456789abcdefABCDEF" for c in token):
+        raise ValueError("Checksum file does not contain a valid SHA-256 digest.")
+    return token.lower()
+
+
+def verify_sha256(path: str, expected_hex: str) -> bool:
+    """True iff the file at ``path`` hashes to ``expected_hex`` (case-insensitive)."""
+    if not expected_hex:
+        return False
+    return sha256_of_file(path).lower() == expected_hex.strip().lower()
 
 
 def check_github(current: str, *, repo: str = DEFAULT_REPO,
@@ -139,11 +205,21 @@ def check_github(current: str, *, repo: str = DEFAULT_REPO,
         return UpdateInfo(current=current, latest=current, available=False)
 
     latest = best.get("tag_name", "")
+    assets = best.get("assets", [])
+    installer = _pick_asset_dict(assets, asset_suffix)
+    download_url = installer.get("browser_download_url", "")
+    sha256_url = ""
+    if installer.get("name"):
+        # CI publishes "<installer-name>.sha256" as a sibling release asset,
+        # matched by the installer's own asset name (not its URL, which need
+        # not share the same filename).
+        sha256_url = _asset_url_by_name(assets, installer["name"] + ".sha256")
     return UpdateInfo(
         current=current, latest=latest,
         available=is_newer(latest, current),
         url=best.get("html_url", ""),
-        download_url=_pick_asset(best.get("assets", []), asset_suffix),
+        download_url=download_url,
+        sha256_url=sha256_url,
         notes=best.get("body", "") or "",
         channel="github",
         prerelease=bool(best.get("prerelease")),

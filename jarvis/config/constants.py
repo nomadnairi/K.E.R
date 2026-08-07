@@ -17,6 +17,15 @@ DEFAULT_MODELS: dict[str, str] = {
     "openai": "gpt-4o",
 }
 
+# Default per-provider *fast* models — used for latency-sensitive turns (voice
+# replies) when the operator hasn't set LLM_MODEL_FAST. Without this, "use a
+# fast model for voice" (see JarvisEngine._ask_llm) silently did nothing unless
+# an operator had already opted in, which defeats the point of a speed default.
+DEFAULT_FAST_MODELS: dict[str, str] = {
+    "anthropic": "claude-3-5-haiku-20241022",
+    "openai": "gpt-4o-mini",
+}
+
 
 class Provider(str, Enum):
     """Supported LLM providers."""

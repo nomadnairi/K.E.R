@@ -14,6 +14,7 @@ import threading
 from pathlib import Path
 
 from jarvis.config.constants import Role
+from jarvis.memory.base import like_prefix_pattern
 from jarvis.models.message import Conversation, Message
 from jarvis.security.crypto import KeyProvider, SecretBox
 from jarvis.utils.logger import get_logger
@@ -89,27 +90,42 @@ class SQLiteConversationStore:
             )
         return conversation
 
-    def sessions(self) -> list[str]:
-        """Return all known session ids."""
+    def sessions(self, *, session_prefix: str | None = None) -> list[str]:
+        """Return all known session ids, optionally scoped to one tenant."""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT DISTINCT session_id FROM messages"
-            ).fetchall()
+            if session_prefix is not None:
+                rows = self._conn.execute(
+                    "SELECT DISTINCT session_id FROM messages WHERE session_id "
+                    "LIKE ? ESCAPE '\\'", (like_prefix_pattern(session_prefix),),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT DISTINCT session_id FROM messages"
+                ).fetchall()
         return [row["session_id"] for row in rows]
 
-    def recent(self, limit: int = 20) -> list[dict]:
+    def recent(self, limit: int = 20, *,
+            session_prefix: str | None = None) -> list[dict]:
         """Recent sessions, newest first: id, title, message count, last time.
 
         ``title`` is the first user message (a natural conversation title).
+        With ``session_prefix`` set, only sessions belonging to that tenant
+        are considered — otherwise every account sharing this engine would
+        see everyone's conversation titles in their own session list.
         """
+        where = ""
+        params: tuple = (max(1, limit),)
+        if session_prefix is not None:
+            where = "WHERE session_id LIKE ? ESCAPE '\\' "
+            params = (like_prefix_pattern(session_prefix), max(1, limit))
         with self._lock:
             rows = self._conn.execute(
                 "SELECT session_id, MAX(timestamp) AS last_ts, COUNT(*) AS n, "
                 "(SELECT content FROM messages m2 WHERE m2.session_id = m.session_id "
                 " AND m2.role = 'user' ORDER BY m2.id ASC LIMIT 1) AS title "
-                "FROM messages m GROUP BY session_id "
+                f"FROM messages m {where}GROUP BY session_id "
                 "ORDER BY last_ts DESC LIMIT ?",
-                (max(1, limit),),
+                params,
             ).fetchall()
         out: list[dict] = []
         for r in rows:
@@ -122,9 +138,15 @@ class SQLiteConversationStore:
                         "last_ts": r["last_ts"]})
         return out
 
-    def count(self, session_id: str | None = None) -> int:
+    def count(self, session_id: str | None = None, *,
+            session_prefix: str | None = None) -> int:
         with self._lock:
-            if session_id is None:
+            if session_prefix is not None:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) AS n FROM messages WHERE session_id LIKE ? "
+                    "ESCAPE '\\'", (like_prefix_pattern(session_prefix),),
+                ).fetchone()
+            elif session_id is None:
                 row = self._conn.execute(
                     "SELECT COUNT(*) AS n FROM messages"
                 ).fetchone()
@@ -137,9 +159,14 @@ class SQLiteConversationStore:
 
     # -- delete -------------------------------------------------------------
 
-    def clear(self, session_id: str | None = None) -> None:
+    def clear(self, session_id: str | None = None, *,
+            session_prefix: str | None = None) -> None:
         with self._lock:
-            if session_id is None:
+            if session_prefix is not None:
+                self._conn.execute(
+                    "DELETE FROM messages WHERE session_id LIKE ? ESCAPE '\\'",
+                    (like_prefix_pattern(session_prefix),))
+            elif session_id is None:
                 self._conn.execute("DELETE FROM messages")
             else:
                 self._conn.execute(

@@ -1,0 +1,165 @@
+# K.E.R. — production infrastructure overlay.
+#
+# Adds Nginx (reverse proxy + Let's Encrypt HTTPS), Certbot (auto-renewal),
+# and Postgres/Redis (internal-only foundation for the future Admin
+# Dashboard) on top of the base docker-compose.yml, without changing it.
+#
+# Usage:
+#   cp .env.example .env               # fill in DOMAIN, LETSENCRYPT_EMAIL, etc.
+#   make web-build                     # the two static roots must exist first
+#   deploy/nginx/init-letsencrypt.sh   # ONE-TIME, once DNS points here
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# See docs/DEPLOY_SITE.md for the step-by-step runbook and
+# docs/INFRASTRUCTURE.md for the wider picture (network diagram, renewal
+# verification, backups, maintenance).
+#
+# `docker compose -f docker-compose.yml up -d` (no overlay) keeps working
+# exactly as before — this file is purely additive.
+
+services:
+  # -- existing services: attach to the internal network, nothing else changes --
+  api:
+    networks:
+      - ker_backend
+
+  bot:
+    networks:
+      - ker_backend
+
+  bot-personal:
+    networks:
+      - ker_backend
+
+  # -- reverse proxy --------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - ker_edge
+      - ker_backend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-example.com}
+      # Restrict envsubst templating to $DOMAIN only — otherwise it would
+      # also try to substitute Nginx's own $host/$uri/etc. variables in the
+      # rendered config (see templates/ker.conf.template's header comment).
+      NGINX_ENVSUBST_FILTER: DOMAIN
+      NGINX_ENVSUBST_TEMPLATE_DIR: /etc/nginx/templates
+      NGINX_ENVSUBST_TEMPLATE_SUFFIX: .template
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
+    entrypoint: ["/docker-entrypoint-wrapper.sh"]
+    command: ["nginx", "-g", "daemon off;"]
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      - ./deploy/nginx/snippets:/etc/nginx/snippets:ro
+      - ./deploy/nginx/docker-entrypoint-wrapper.sh:/docker-entrypoint-wrapper.sh:ro
+      - ker_nginx_dhparam:/etc/nginx/ssl:ro
+      - ker_certbot_etc:/etc/letsencrypt:ro
+      - ker_certbot_webroot:/var/www/certbot:ro
+      - ./logs/nginx:/var/log/nginx
+      # Built static front-ends. Plain bind mounts of the Vite output — no
+      # extra container, no build step inside the image: `make web-build`
+      # produces these on the host and nginx just serves them. Run it BEFORE
+      # `up -d`: if the directories are missing, Docker creates them empty and
+      # root-owned, and both hostnames answer 403.
+      - ./web/site/dist:/var/www/site:ro
+      - ./web/dashboard/dist:/var/www/dashboard:ro
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # -- automatic certificate renewal -----------------------------------------
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    networks:
+      - ker_backend
+    volumes:
+      - ker_certbot_etc:/etc/letsencrypt
+      - ker_certbot_var:/var/lib/letsencrypt
+      - ker_certbot_webroot:/var/www/certbot
+      - ./deploy/nginx:/scripts:ro
+    environment:
+      DOMAIN: ${DOMAIN:-example.com}
+    entrypoint: /bin/sh
+    command: >
+      -c 'trap exit TERM;
+          while :; do
+            certbot renew --webroot -w /var/www/certbot --quiet;
+            sleep 12h & wait $${!};
+          done'
+    healthcheck:
+      test: ["CMD", "/scripts/check-cert-renewal.sh"]
+      interval: 12h
+      timeout: 30s
+      retries: 1
+      start_period: 5m
+
+  # -- future Admin Dashboard foundation (unused by the app today) ----------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks:
+      - ker_backend
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-ker}
+    volumes:
+      - ker_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ker}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - ker_backend
+    command: >
+      sh -c 'if [ -n "$$REDIS_PASSWORD" ]; then
+               exec redis-server --requirepass "$$REDIS_PASSWORD";
+             else
+               exec redis-server;
+             fi'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    volumes:
+      - ker_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  ker_edge:
+    name: ker_edge
+  ker_backend:
+    name: ker_backend
+
+volumes:
+  ker_certbot_etc:
+    name: ker_certbot_etc
+  ker_certbot_var:
+    name: ker_certbot_var
+  ker_certbot_webroot:
+    name: ker_certbot_webroot
+  ker_nginx_dhparam:
+    name: ker_nginx_dhparam
+  ker_postgres_data:
+    name: ker_postgres_data
+  ker_redis_data:
+    name: ker_redis_data

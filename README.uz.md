@@ -66,7 +66,16 @@ tokenlar va karta raqamlari saqlanishdan oldin olib tashlanadi.
 **Haqiqatan ish bajarish.** Model shunchaki javob bermaydi — u vositalarni
 chaqira oladi: internetdan qidirish, fayllarni o'qish va yozish, terminalda
 buyruqlar bajarish, kompyuterni boshqarish, ob-havoni ko'rish, aqlli uy bilan
-gaplashish. Xavfli imkoniyatlar sukut bo'yicha o'chirilgan va bittalab yoqiladi.
+gaplashish. Kompyuterni boshqarish tayyor bot orqali ham ishlaydi, nafaqat
+lokal ilovada — kichik lokal yordamchi bosish, tugma yoki havolani sizning
+kompyuteringizga uzatadi, serverga emas. Xavfli imkoniyatlar sukut bo'yicha
+o'chirilgan va bittalab yoqiladi.
+
+**Ekraningizni ko'ra oladi.** Ekran almashishni yoqing — shunchaki so'rang,
+menyularni titkilash shart emas — va u haqiqatan nima ochiqligini ko'radi:
+kod bo'lagini tushuntiradi, oynani tasvirlaydi. Har xabarga bitta kadr,
+uzluksiz video emas — qo'ng'iroqda ekran almashishga o'xshaydi, faqat
+uzluksiz oqimsiz.
 
 **Yangi vositalarni ulash (MCP).** KER Model Context Protocol tilida
 gaplashadi, shuning uchun istalgan MCP-server vositalari yordamchining o'z
@@ -141,7 +150,9 @@ eslaydi, ovozda javob beradi, va tariflar (Free / Plus / Pro) premium
 imkoniyatlar hamda yuqori limitlarni ochadi.
 
 Sozlamalar ozoda ichma-ich menyularda: til, yordamchi nomi, AI modeli, xotira,
-ovoz, integratsiyalar va boshqalar.
+ovoz, integratsiyalar va boshqalar. Bot menyusidagi referal havolangiz orqali
+do'stlaringizni taklif qiling — ikkalangiz ham qo'shimcha kunlik xabarlar
+olasiz.
 
 ---
 
@@ -158,11 +169,13 @@ kirish kodi**. Hamma bir xil kiradi, egasi ham — shunchaki uning hisobi
 hammasini ochadi.
 
 Keyin nima ko'rishingiz obunaga bog'liq. Free suhbatlashadi va eslaydi; Plus
-veb-qidiruv, ovoz, barcha modellar va rasmlarni qo'shadi; Pro esa faqat
-dvigatel sizning kompyuteringizda ishlaganda mavjud bo'lgan imkoniyatlarni:
-fayllar, terminal, kompyuterni boshqarish, MCP-serverlar va lokal modellar.
-Tarifingizga kirmagan bo'limlar yashirilmaydi — ular nima ochishini ko'rsatib
-turadi.
+veb-qidiruv, ovoz, barcha modellar va rasmlarni qo'shadi; Pro esa fayllar,
+terminal, MCP-serverlar va lokal modellarni qo'shadi — bular faqat
+dvigatelning o'zi sizning kompyuteringizda ishlaganda mavjud bo'lgan
+imkoniyatlar. Kompyuterni boshqarish va ekran almashish bundan mustasno:
+ular tayyor bot orqali ham ishlaydi — kichik lokal yordamchi haqiqiy amalni
+serverga emas, sizning kompyuteringizda qoldiradi. Tarifingizga kirmagan
+bo'limlar yashirilmaydi — ular nima ochishini ko'rsatib turadi.
 
 Bu oynadagi sozlamalar haqiqiy: til, mavzu, yordamchi nomi, provayder va
 API-kalitlar, kompyuterga ruxsatlar, ovoz dvigatellari, integratsiyalar,

@@ -34,22 +34,25 @@ class FakeClient:
         self.calls.append(("info",))
         return dict(self.server_info)
 
-    def login(self, username: str, password: str) -> str:
+    def login(self, username: str, password: str, **device) -> str:
         self.calls.append(("login", username, password))
+        self.last_device = device
         if password == "wrong":
             raise ApiError(401, "Bad credentials")
         self.token = "token-123"
         return self.token
 
-    def register(self, username: str, password: str) -> str:
+    def register(self, username: str, password: str, **device) -> str:
         self.calls.append(("register", username, password))
+        self.last_device = device
         if username == "taken":
             raise ApiError(409, "That username is taken.")
         self.token = "token-new"
         return self.token
 
-    def login_with_telegram_code(self, code: str) -> str:
+    def login_with_telegram_code(self, code: str, **device) -> str:
         self.calls.append(("telegram", code))
+        self.last_device = device
         if code == "000000":
             raise ApiError(400, "Code expired")
         self.token = "token-tg"
@@ -82,6 +85,31 @@ class FakeClient:
         self.calls.append(("usage",))
         return {"tier": "plus", "used_today": 250, "limit": 1000,
                 "remaining": 750, "unlimited": False}
+
+    # -- devices --------------------------------------------------------------
+
+    def list_devices(self) -> dict:
+        self.calls.append(("list_devices",))
+        sessions = getattr(self, "_sessions", [
+            {"id": "sess-1", "device_id": "dev-1", "device_name": "Laptop",
+            "platform": "Windows", "client_type": "desktop",
+            "created_at": 1.0, "last_seen_at": 2.0, "expires_at": 9e9,
+            "online": True},
+        ])
+        return {"live_devices": getattr(self, "_live_devices", []),
+                "sessions": sessions}
+
+    def revoke_device(self, session_id: str) -> None:
+        self.calls.append(("revoke_device", session_id))
+        self._sessions = [s for s in getattr(self, "_sessions", self.list_devices()["sessions"])
+                        if s["id"] != session_id]
+
+    # -- account --------------------------------------------------------------
+
+    def change_password(self, current_password: str, new_password: str) -> None:
+        self.calls.append(("change_password", current_password, new_password))
+        if current_password == "wrong":
+            raise ApiError(401, "Your current password is incorrect.")
 
 
 class UnreachableClient(FakeClient):
@@ -125,6 +153,25 @@ def test_password_sign_in_stores_the_token_and_the_plan(bridge, tmp_path):
     assert saved.role == "user"
     # Free has no local capabilities, so the engine is the server's.
     assert saved.mode == "remote"
+
+
+def test_password_sign_in_sends_and_persists_a_device_id(bridge, tmp_path):
+    """Этап 2 / Фаза B1 — the bridge mints and sends this install's device
+    id on every sign-in, so the account's Device Manager has something to
+    show, and the id survives a restart instead of changing every login."""
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    first_id = bridge.config.device_id
+    assert first_id
+    assert bridge.client.last_device["device_id"] == first_id
+    assert bridge.client.last_device["client_type"] == "desktop"
+    assert AppConfig.load(tmp_path).device_id == first_id
+
+    # A second sign-in (e.g. a different account on the same install) reuses
+    # the same device id rather than minting a new one each time.
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    assert bridge.client.last_device["device_id"] == first_id
 
 
 def test_password_sign_in_reports_the_server_error(bridge):
@@ -519,6 +566,83 @@ def test_usage_is_unavailable_when_the_server_has_no_proxy(tmp_path):
     # A missing endpoint is "nothing to show", not an error to apologise for.
     assert out["ok"] is True and out["unavailable"] is True
     assert out["usage"] is None
+
+
+# -- devices (Device Manager — Этап 2 / Фаза A4 backend, B4 UI) -------------
+
+
+def test_devices_need_a_signed_in_client(bridge):
+    assert bridge.handle("devices.list")["ok"] is False
+    assert bridge.handle("devices.revoke", {"id": "x"})["ok"] is False
+
+
+def test_devices_list_merges_sessions_and_tags_the_current_device(bridge, tmp_path):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    out = bridge.handle("devices.list")
+    assert out["ok"] is True
+    assert out["sessions"][0]["device_id"] == "dev-1"
+    # This install's own device_id (minted by the login itself) comes back
+    # so the deck can mark "this device" and guard self-logout.
+    assert out["current_device_id"] == bridge.config.device_id
+    assert out["current_device_id"]
+
+
+def test_revoking_a_device_session_removes_it_from_the_list(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    out = bridge.handle("devices.revoke", {"id": "sess-1"})
+    assert out["ok"] is True
+    assert out["sessions"] == []
+
+
+def test_revoking_a_device_without_an_id_is_refused(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    assert bridge.handle("devices.revoke", {})["ok"] is False
+
+
+# -- account: change password (Этап 2 / Фаза B5) -----------------------------
+
+
+def test_change_password_needs_a_signed_in_client(bridge):
+    out = bridge.handle("account.change_password",
+                        {"current_password": "x", "new_password": "y"})
+    assert out["ok"] is False
+
+
+def test_change_password_forwards_to_the_client(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    out = bridge.handle("account.change_password",
+                        {"current_password": "secret", "new_password": "newpass1"})
+    assert out == {"ok": True}
+
+
+def test_change_password_reports_a_wrong_current_password(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    out = bridge.handle("account.change_password",
+                        {"current_password": "wrong", "new_password": "newpass1"})
+    assert out == {"ok": False, "error": "Your current password is incorrect."}
+
+
+def test_change_password_needs_both_fields(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    assert bridge.handle("account.change_password",
+                        {"current_password": "", "new_password": "x"})["ok"] is False
+    assert bridge.handle("account.change_password",
+                        {"current_password": "x", "new_password": ""})["ok"] is False
+
+
+def test_change_password_rejects_mismatched_confirmation(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    out = bridge.handle("account.change_password",
+                        {"current_password": "secret", "new_password": "newpass1",
+                        "new_password2": "different"})
+    assert out["ok"] is False
 
 
 # -- MCP servers ------------------------------------------------------------

@@ -46,6 +46,7 @@ class ServiceContainer:
         metrics: MetricsCollector | None = None,
         memory: MemoryManager | None = None,
         integrations: IntegrationManager | None = None,
+        desktop_controller: object | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._event_bus_override = event_bus
@@ -55,6 +56,12 @@ class ServiceContainer:
         self._memory_override = memory
         self._integrations_override = integrations
         self._integrations_set = integrations is not None
+        #: Overrides the in-process DesktopController that would otherwise be
+        #: built from `self.security` — used by the API server (which has no
+        #: desktop of its own) to advertise desktop tools while relying
+        #: entirely on a per-call `device_relay` in context to actually run
+        #: them. See jarvis/desktop/device_registry.py.
+        self._desktop_controller_override = desktop_controller
 
     @property
     def settings(self) -> Settings:
@@ -100,6 +107,14 @@ class ServiceContainer:
         from jarvis.security.confirm import ConfirmationBroker
         return ConfirmationBroker(
             timeout=self._settings.confirm_timeout_seconds)
+
+    @cached_property
+    def devices(self):
+        """Tracks connected local devices and relays desktop-tool calls to
+        them — the server side of "cloud brain, local hands"; see
+        jarvis/desktop/device_registry.py."""
+        from jarvis.desktop.device_registry import DeviceRegistry
+        return DeviceRegistry(timeout=self._settings.device_relay_timeout_seconds)
 
     @cached_property
     def security(self) -> SecurityManager:
@@ -214,15 +229,28 @@ class ServiceContainer:
                 coding_skills(self.shell, self._settings.test_command)
             )
         # Expose desktop-control tools (gated by allow_desktop_control).
+        # A custom controller (see `desktop_controller` override) lets a
+        # server-hosted engine — which has no desktop of its own — advertise
+        # these tools while refusing direct execution unless a per-call relay
+        # is provided via context (jarvis/desktop/tools.py); the default here
+        # is the real, in-process controller every local engine has always used.
         if self._settings.desktop_enabled:
             from jarvis.desktop.controller import DesktopController
             from jarvis.desktop.tools import desktop_skills
-            registry.register_many(desktop_skills(DesktopController(self.security)))
+            controller = self._desktop_controller_override or DesktopController(self.security)
+            registry.register_many(desktop_skills(controller))
         # Expose the web-search tool (gated by SEARCH_ENABLED; keyless
         # DuckDuckGo fallback means it works even with no API keys).
         if self.search is not None:
             from jarvis.search.tools import search_skills
             registry.register_many(search_skills(self.search))
+        # Expose the generate_image tool (gated by IMAGE_ENABLED + a usable key).
+        if self._settings.image_enabled:
+            from jarvis.media.image_service import ImageService
+            from jarvis.media.tools import image_skills
+            image_service = ImageService.from_settings(self._settings)
+            if image_service.available():
+                registry.register_many(image_skills(image_service))
         # Expose the run_agent tool (delegating to an autonomous sub-agent).
         if self._settings.agents_enabled:
             from jarvis.agents.tools import RunAgentSkill

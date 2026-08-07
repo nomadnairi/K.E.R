@@ -111,6 +111,24 @@ class LLMProvider(ABC):
         """
         raise NotImplementedError
 
+    def vision_user_message(self, text: str, image_b64: str,
+                            mime: str = "image/png") -> dict:
+        """Build a user message carrying both ``text`` and an image.
+
+        Default is OpenAI's content-parts shape, used as-is by OpenRouter and
+        any local OpenAI-compatible backend (they all send ``messages``
+        straight to an OpenAI-shaped SDK call, untouched). Anthropic overrides
+        this for its own block shape.
+        """
+        return {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": text},
+                {"type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{image_b64}"}},
+            ],
+        }
+
     def is_available(self) -> bool:
         """Whether the provider has the credentials it needs to run."""
         return bool(self.api_key)

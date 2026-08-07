@@ -11,7 +11,7 @@ Callback scheme (kept short — Telegram caps callback_data at 64 bytes):
     m:main  m:profile  m:usage  m:subscription  m:settings  m:memory
     m:model  m:language  m:help  m:link  m:plans  m:reset  m:forget  m:admin
     m:setmodel:<name|auto>   m:setlang:<locale>   m:buy[:<tier>]
-    m:catalog[:<page>]   m:setcat:<index>
+    m:catalog[:<page>]   m:setcat:<index>   m:plandetail:<tier>
 """
 
 from __future__ import annotations
@@ -161,26 +161,40 @@ def plan_card(locale: str, plan, *, current: bool = False) -> str:
     ])
 
 
-def screen_plans(locale: str, plans: dict, current_tier: str) -> tuple[str, Rows]:
-    """The Tariffs screen — Free / Plus / Pro side by side with buy buttons."""
+def screen_plans_hub(locale: str, plans: dict, current_tier: str) -> tuple[str, Rows]:
+    """The Tariffs hub — one button per tier, details live one level down."""
     from jarvis.billing import TIER_ORDER
 
-    blocks = [f"💎 <b>{t('plans_title', locale)}</b>", t("plans_hint", locale), ""]
-    for tier in TIER_ORDER:
-        blocks.append(plan_card(locale, plans[tier], current=(tier == current_tier)))
-        blocks.append("")
-    # Only offer upgrades — tiers strictly above the current one.
-    current_rank = TIER_ORDER.index(current_tier) if current_tier in TIER_ORDER else 0
+    text = "\n".join([f"💎 <b>{t('plans_title', locale)}</b>", t("plans_hint", locale)])
     rows: Rows = []
-    for tier in ("plus", "pro"):
-        if TIER_ORDER.index(tier) <= current_rank:
-            continue
+    for tier in TIER_ORDER:
         p = plans[tier]
-        rows.append([_b(
-            t("plan_buy", locale, plan=t(f"plan_{tier}", locale), price=p.price_stars),
-            f"buy:{tier}")])
+        label = f"{p.emoji} {t(f'plan_{tier}', locale)}"
+        if tier == current_tier:
+            label += f" · {t('plan_current', locale)}"
+        rows.append([_b(label, f"plandetail:{tier}")])
     rows.append(_back(locale))
-    return "\n".join(blocks).strip(), rows
+    return text, rows
+
+
+def screen_plan_detail(locale: str, plans: dict, current_tier: str,
+                        tier: str) -> tuple[str, Rows]:
+    """One tier's full card, with a Buy button if it's above the current tier."""
+    from jarvis.billing import TIER_ORDER
+
+    plan = plans[tier]
+    text = "\n".join([
+        f"💎 <b>{t('plans_title', locale)}</b>", "",
+        plan_card(locale, plan, current=(tier == current_tier)),
+    ])
+    rows: Rows = []
+    current_rank = TIER_ORDER.index(current_tier) if current_tier in TIER_ORDER else 0
+    if tier in ("plus", "pro") and TIER_ORDER.index(tier) > current_rank:
+        rows.append([_b(
+            t("plan_buy", locale, plan=t(f"plan_{tier}", locale), price=plan.price_stars),
+            f"buy:{tier}")])
+    rows.append(_nav(locale, "plans"))
+    return text, rows
 
 
 def screen_search(locale: str, results: list, current_slug: str = "",
@@ -685,6 +699,7 @@ def screen_link(locale: str, *, app_login: bool = False) -> tuple[str, Rows]:
     rows: Rows = []
     if app_login:
         rows.append([_b(t("app_login_btn", locale), "appcode")])
+        rows.append([_b(t("set_password_btn", locale), "setpass")])
     rows.append(_back(locale))
     return text, rows
 

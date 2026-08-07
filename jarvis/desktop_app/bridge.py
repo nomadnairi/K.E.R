@@ -190,6 +190,20 @@ class Bridge:
 
     # -- signing in -----------------------------------------------------------
 
+    def _device_meta(self) -> dict:
+        """This install's device fields (Этап 2 / Фаза B1).
+
+        ``device_id`` is minted once and persisted; name/platform are read
+        fresh every time, since they describe the machine, not the account.
+        """
+        import platform as _platform
+        return {
+            "device_id": self.config.ensure_device_id(),
+            "device_name": _platform.node(),
+            "platform": _platform.system(),
+            "client_type": "desktop",
+        }
+
     def _do_login_password(self, payload: dict) -> dict:
         server = str(payload.get("server", "")).strip()
         username = str(payload.get("username", "")).strip()
@@ -197,7 +211,7 @@ class Bridge:
         if not server or not username or not password:
             return {"ok": False, "error": "Fill in server, username and password."}
         client = self._client_factory(server)
-        client.login(username, password)
+        client.login(username, password, **self._device_meta())
         return self._remember(client, username=username)
 
     def _do_server_probe(self, payload: dict) -> dict:
@@ -241,7 +255,7 @@ class Bridge:
         if password != str(payload.get("password2", password)):
             return {"ok": False, "error": "The two passwords do not match."}
         client = self._client_factory(server)
-        client.register(username, password)
+        client.register(username, password, **self._device_meta())
         return self._remember(client, username=username)
 
     def _do_login_telegram(self, payload: dict) -> dict:
@@ -250,7 +264,7 @@ class Bridge:
         if not server or not code:
             return {"ok": False, "error": "Enter the server and the login code."}
         client = self._client_factory(server)
-        client.login_with_telegram_code(code)
+        client.login_with_telegram_code(code, **self._device_meta())
         return self._remember(client)
 
     def _remember(self, client: JarvisApiClient, *, username: str = "") -> dict:
@@ -320,6 +334,55 @@ class Bridge:
             return {"ok": False, "error": "Which key?"}
         self.client.revoke_api_key(key_id)
         return {"ok": True, "keys": self.client.list_api_keys()}
+
+    # -- devices (Device Manager — Этап 2 / Фаза A4 backend, B4 UI) -----------
+
+    def _do_devices_list(self, _payload: dict) -> dict:
+        """This account's devices: live desktop-control connections merged
+        with every login session ever issued to it, plus which one is this
+        very install — so the deck can mark it and guard against an
+        accidental self-logout."""
+        if self.client is None:
+            return {"ok": False, "error": "Not signed in."}
+        out = dict(self.client.list_devices())
+        out["ok"] = True
+        out["current_device_id"] = self.config.device_id
+        return out
+
+    def _do_devices_revoke(self, payload: dict) -> dict:
+        """End one of the account's own sessions; it stops working on that
+        device's very next request."""
+        if self.client is None:
+            return {"ok": False, "error": "Not signed in."}
+        session_id = str(payload.get("id", "")).strip()
+        if not session_id:
+            return {"ok": False, "error": "Which session?"}
+        self.client.revoke_device(session_id)
+        out = dict(self.client.list_devices())
+        out["ok"] = True
+        out["current_device_id"] = self.config.device_id
+        return out
+
+    # -- account (Этап 2 / Фаза B5) --------------------------------------------
+
+    def _do_account_change_password(self, payload: dict) -> dict:
+        """Change the signed-in account's password.
+
+        The server re-checks the current password itself
+        (POST /auth/change-password) — this just forwards the two fields
+        and turns its 401 into the same ``{"ok": False, "error": ...}``
+        shape every other bridge action already returns.
+        """
+        if self.client is None:
+            return {"ok": False, "error": "Not signed in."}
+        current = str(payload.get("current_password", ""))
+        new = str(payload.get("new_password", ""))
+        if not current or not new:
+            return {"ok": False, "error": "Fill in both password fields."}
+        if new != str(payload.get("new_password2", new)):
+            return {"ok": False, "error": "The two new passwords do not match."}
+        self.client.change_password(current, new)
+        return {"ok": True}
 
     # -- MCP servers (Pro: external tool servers) -----------------------------
 

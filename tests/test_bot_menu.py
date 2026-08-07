@@ -14,6 +14,7 @@ from jarvis.interfaces.bot_menu import (
     screen_admin,
     screen_confirm,
     screen_language,
+    screen_link,
     screen_main,
     screen_memory,
     screen_model,
@@ -282,3 +283,20 @@ def test_subscription_text_states():
     inactive = subscription_text("en", account="tony",
                                 licenses=[Lic("std", now - 1)], now=now)
     assert "No active" in inactive
+
+
+# -- screen_link: app login + password-setting entry points -----------------
+
+
+def test_screen_link_hides_app_login_when_accounts_disabled():
+    _text, rows = screen_link("en", app_login=False)
+    flat = _flat(rows)
+    assert "m:appcode" not in flat
+    assert "m:setpass" not in flat
+
+
+def test_screen_link_offers_both_code_and_password_when_enabled():
+    _text, rows = screen_link("en", app_login=True)
+    flat = _flat(rows)
+    assert "m:appcode" in flat
+    assert "m:setpass" in flat

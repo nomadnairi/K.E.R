@@ -13,6 +13,14 @@
 #
 # The api + public bot share the data/ + logs/ volumes; the personal bot keeps
 # its own memory so the two never mix.
+#
+# Production deployment (Nginx reverse proxy, automatic Let's Encrypt HTTPS,
+# hardened Docker networking, Postgres/Redis foundation for the Admin
+# Dashboard): see docker-compose.prod.yml and docs/INFRASTRUCTURE.md. It's an
+# additive overlay — this file and the plain `docker compose up -d` above are
+# unchanged and keep working exactly as before:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
   api:

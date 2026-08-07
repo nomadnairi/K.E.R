@@ -45,6 +45,9 @@ class AppConfig:
     start_on_boot: bool = False
     #: Show a desktop notification when a reply arrives while hidden.
     notifications: bool = True
+    #: Local mode only: let KER notice things (system load, ...) and speak up
+    #: unprompted, not just reply. Off by default -- an explicit opt-in.
+    proactive_enabled: bool = False
     #: Set once the first-run onboarding has been shown.
     onboarded: bool = False
     #: Check GitHub for updates on launch and open the download automatically.
@@ -64,6 +67,11 @@ class AppConfig:
     #: Login token from /auth/login (stored so you stay signed in).
     auth_token: str = ""
     username: str = ""
+    #: Stable per-install identifier (Этап 2 / Фаза B1), generated once via
+    #: uuid4() the first time it's needed and persisted from then on — lets
+    #: the server's Device Manager tell this install apart from any other
+    #: device signed into the same account, across logins and restarts.
+    device_id: str = ""
 
     # -- subscription (cached from the server) --------------------------------
     # Kept on disk so the app still opens, and still knows what it may show,
@@ -164,6 +172,19 @@ class AppConfig:
             pass
         return path
 
+    def ensure_device_id(self) -> str:
+        """Return this install's device id, minting one the first time.
+
+        Called lazily (not in ``__post_init__``) so a freshly-loaded config
+        that never signs in never writes an id it doesn't need — callers that
+        do sign in are expected to ``save()`` afterwards, same as every other
+        field this class mutates on login.
+        """
+        if not self.device_id:
+            import uuid
+            self.device_id = str(uuid.uuid4())
+        return self.device_id
+
     # -- where the engine runs ------------------------------------------------
 
     def may_run_locally(self) -> bool:
@@ -227,6 +248,7 @@ class AppConfig:
             "tts_voice": self.tts_voice,
             "local_whisper_model": self.local_whisper_model,
             "voice_replies": self.voice_replies,
+            "proactive_sensors_enabled": self.proactive_enabled,
         }
         if self.assistant_name:
             overrides["assistant_name"] = self.assistant_name

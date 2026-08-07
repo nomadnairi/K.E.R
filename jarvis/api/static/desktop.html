@@ -629,6 +629,7 @@
     <div class="grp">Система</div>
     <div class="nav" data-view="settings" onclick="go('settings')" title="Настройки"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3.9a7 7 0 0 0-1.7-1l-.4-2.5h-4l-.4 2.5a7 7 0 0 0-1.7 1L4.1 5 2 8.5 4 10a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.3.9 2-3.4-2-1.5a7 7 0 0 0 .1-1z"/></svg><span>Настройки</span></div>
     <div class="nav" data-view="plan" onclick="go('plan')" title="Тарифы"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9l9-5 9 5-9 5-9-5z"/><path d="M3 15l9 5 9-5M3 12l9 5 9-5"/></svg><span>Тарифы</span></div>
+    <div class="nav" data-view="devices" onclick="go('devices')" title="Устройства"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6"/><rect x="16" y="9" width="6" height="10" rx="1.2"/></svg><span>Устройства</span></div>
     <div class="nav" data-view="apikeys" onclick="go('apikeys')" title="API-ключи"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7 7 5 5 0 0 1 7-7zm0 0L15 8m0 0l3 3 3-3-3-3"/></svg><span>API-ключи</span></div>
     <div class="nav" data-view="logs" onclick="go('logs')" title="Журнал"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h11l5 5v11H4z"/><path d="M8 12h8M8 16h5"/></svg><span>Журнал</span></div>
     <div class="nav" data-view="profile" onclick="go('profile')" title="Профиль"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Профиль</span></div>
@@ -756,6 +757,11 @@
       <div class="spanel" id="planPanel">Загрузка…</div>
     </section>
 
+    <!-- DEVICES (Device Manager — Этап 2 / Фаза A4 backend, B4 UI) -->
+    <section class="view" id="view-devices" hidden>
+      <div class="spanel" id="devicesPanel">Загрузка…</div>
+    </section>
+
     <!-- API KEYS (the credential behind "API от меня") -->
     <section class="view" id="view-apikeys" hidden>
       <div class="spanel" id="apikeysPanel">Загрузка…</div>
@@ -773,13 +779,9 @@
       </div>
     </section>
 
-    <!-- PROFILE -->
+    <!-- PROFILE (Этап 2 / Фаза B5) -->
     <section class="view" id="view-profile" hidden>
-      <div class="card profile"><div class="body" style="display:flex; gap:18px; align-items:center">
-        <div class="av">🧑‍🚀</div>
-        <div><div style="font-weight:800; font-size:18px">Sir</div><div style="color:var(--muted); font-size:13px">Локальный аккаунт</div>
-          <div style="margin-top:10px; display:flex; gap:8px"><span class="tag pop">Pro</span><span class="tag">Владелец</span></div></div>
-      </div></div>
+      <div class="spanel" id="profilePanel">Загрузка…</div>
     </section>
 
     <!-- ABOUT -->
@@ -819,8 +821,8 @@
   CFG.api = CFG.api || localStorage.getItem("jarvis.api") || "";
   CFG.key = CFG.key || localStorage.getItem("jarvis.key") || "";
   const $ = id => document.getElementById(id);
-  const TITLE={home:"Главная",chat:"Чат",models:"Модели",memory:"Память",internet:"Интернет",mcp:"MCP серверы",settings:"Настройки",plan:"Тарифы",apikeys:"API-ключи",logs:"Журнал",profile:"Профиль",about:"О системе"};
-  const SUB={home:"Добро пожаловать, сэр",chat:"Диалог с ассистентом",models:"Каталог моделей",memory:"Управление памятью",internet:"Веб-поиск",mcp:"Внешние инструменты (MCP)",settings:"Персонализация",plan:"Подписка и лимиты",apikeys:"Доступ к API от меня",logs:"Что происходило",profile:"Ваш профиль",about:"О системе"};
+  const TITLE={home:"Главная",chat:"Чат",models:"Модели",memory:"Память",internet:"Интернет",mcp:"MCP серверы",settings:"Настройки",plan:"Тарифы",devices:"Устройства",apikeys:"API-ключи",logs:"Журнал",profile:"Профиль",about:"О системе"};
+  const SUB={home:"Добро пожаловать, сэр",chat:"Диалог с ассистентом",models:"Каталог моделей",memory:"Управление памятью",internet:"Веб-поиск",mcp:"Внешние инструменты (MCP)",settings:"Персонализация",plan:"Подписка и лимиты",devices:"Кто и с чего сейчас в аккаунте",apikeys:"Доступ к API от меня",logs:"Что происходило",profile:"Ваш профиль",about:"О системе"};
 
   // ---- the app itself ----------------------------------------------------
   // Served from ker://deck inside KER.exe, so the app answers these requests
@@ -920,6 +922,7 @@
     if(v==="chat") loadSessions(); if(v==="logs") loadLogs();
     if(v==="internet") loadNet(); if(v==="memory") loadMemory();
     if(v==="plan") loadPlanScreen(); if(v==="apikeys") loadApiKeys();
+    if(v==="devices") loadDevices(); if(v==="profile") loadProfile();
     if(v==="mcp") loadMcp();}
 
   function authH(){return CFG.key?{"X-API-Key":CFG.key,"Authorization":"Bearer "+CFG.key}:{};}
@@ -1136,12 +1139,21 @@
   }
 
   // ---- chat + history ----  (loaded live; no fabricated conversations)
+  //
+  // History used to be inert (Этап 2 / Фаза B6 audit) — sessions were listed
+  // but clicking one did nothing, and the main chat always talked to one
+  // fixed session_id ("dashboard"). A history entry IS a chat with a
+  // different session_id, so "opening" one means switching which id the
+  // composer sends to /chat, not building a second chat screen.
   const HIST_EMPTY=[["История",[]]];
+  const DEFAULT_SESSION="dashboard";
+  let ACTIVE_SESSION=DEFAULT_SESSION;       // raw id sent as /chat's session_id
+  let ACTIVE_SESSION_FULL=null;             // the full "principal::id" from the server, for highlighting
   function groupByDay(rows){
     const today=new Date().toDateString(), out={};
     rows.forEach(r=>{const d=new Date((r.last_ts||0)*1000);
       const key=d.toDateString()===today?"Сегодня":d.toLocaleDateString([],{day:"numeric",month:"short"});
-      (out[key]=out[key]||[]).push([r.title, d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})]);});
+      (out[key]=out[key]||[]).push([r.title, d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}), r.session_id]);});
     return Object.entries(out);
   }
   async function loadSessions(){
@@ -1150,14 +1162,52 @@
       renderHist(d.sessions&&d.sessions.length?groupByDay(d.sessions):HIST_EMPTY);}
     catch(e){renderHist(HIST_EMPTY);}
   }
-  function renderHist(groups){$("histList").innerHTML=(groups||[]).map(([g,items])=>`<div class="hgrp">${g}</div>`+(items.length?items.map((it,i)=>`<div class="item ${g==='Сегодня'&&i===0?'on':''}"><span>${(it[0]||'').replace(/</g,'&lt;')}</span><time>${it[1]}</time></div>`).join(""):'<div class="item" style="color:var(--dim)">пусто</div>')).join("");}
+  function renderHist(groups){
+    $("histList").innerHTML=(groups||[]).map(([g,items])=>`<div class="hgrp">${g}</div>`+(items.length?items.map(it=>{
+      const sid=it[2];
+      const on=sid&&sid===ACTIVE_SESSION_FULL?" on":"";
+      const click=sid?` onclick="openHistorySession('${esc(sid)}')" style="cursor:pointer"`:"";
+      return `<div class="item${on}"${click}><span>${(it[0]||'').replace(/</g,'&lt;')}</span><time>${it[1]}</time></div>`;
+    }).join(""):'<div class="item" style="color:var(--dim)">пусто</div>')).join("");
+  }
   renderHist(HIST_EMPTY);
   function botName(){const e=$("coreName"); return (e&&e.textContent.trim())||"KER";}
-  function newChat(){$("stream").innerHTML='<div class="msg j"><div class="who">'+botName()+'</div>Новый диалог. Чем могу помочь, сэр?</div>';}
+  function newChat(){
+    ACTIVE_SESSION=DEFAULT_SESSION; ACTIVE_SESSION_FULL=null;
+    $("stream").innerHTML='<div class="msg j"><div class="who">'+botName()+'</div>Новый диалог. Чем могу помочь, сэр?</div>';
+    document.querySelectorAll("#histList .item").forEach(el=>el.classList.remove("on"));
+  }
+  //: Reopen a past conversation: load its messages and point the composer
+  //: at it. fullId is the server's "principal::id" — stripping everything
+  //: up to the first "::" gives back the raw id /chat expects, without the
+  //: page needing to know or reconstruct its own principal string.
+  async function openHistorySession(fullId){
+    const stream=$("stream"); if(!stream||!CFG.api) return;
+    stream.innerHTML='<div class="msg j"><div class="who">'+botName()+'</div>Загрузка истории…</div>';
+    try{
+      const r=await fetch(CFG.api+"/dashboard/sessions/"+encodeURIComponent(fullId)+"/messages",
+        {headers:authH()});
+      if(!r.ok) throw new Error("http "+r.status);
+      const d=await r.json();
+      ACTIVE_SESSION_FULL=fullId;
+      ACTIVE_SESSION=fullId.includes("::")?fullId.split("::").slice(1).join("::"):fullId;
+      const msgs=d.messages||[];
+      stream.innerHTML=msgs.length?msgs.map(m=>{
+        const who=m.role==="user"?"u":"j";
+        const label=m.role==="user"?"Вы":(m.role==="system"?"Система":botName());
+        return `<div class="msg ${who}"><div class="who">${label}</div>`
+          +String(m.content||"").replace(/</g,"&lt;")+"</div>";
+      }).join("") : '<div class="msg j"><div class="who">'+botName()+'</div>В этой сессии пока нет сообщений.</div>';
+      stream.scrollTop=stream.scrollHeight;
+      loadSessions();  // re-render the list so the newly active item lights up
+    }catch(e){
+      stream.innerHTML='<div class="msg j"><div class="who">'+botName()+'</div>Не удалось открыть историю.</div>';
+    }
+  }
   function addMsg(t,who){const el=document.createElement("div");el.className="msg "+(who==="u"?"u":"j");el.innerHTML=`<div class="who">${who==="u"?"Вы":botName()}</div>`+t.replace(/</g,"&lt;");$("stream").appendChild(el);$("stream").scrollTop=$("stream").scrollHeight;return el;}
   async function sendMsg(){const q=$("q").value.trim();if(!q)return;$("q").value="";addMsg(q,"u");pulse();const th=addMsg("…","j");
     if(!CFG.api){th.innerHTML='<div class="who">'+botName()+'</div>Подключите бэкенд в Настройках → Подключение, сэр. (Демо.)';return;}
-    try{const r=await fetch(CFG.api+"/chat",{method:"POST",headers:{"Content-Type":"application/json",...authH()},body:JSON.stringify({message:q,session_id:"dashboard"})});const j=await r.json();th.innerHTML='<div class="who">'+botName()+'</div>'+(j.reply||"—").replace(/</g,"&lt;");}catch(e){th.innerHTML='<div class="who">'+botName()+'</div>Сбой соединения, сэр.';}}
+    try{const r=await fetch(CFG.api+"/chat",{method:"POST",headers:{"Content-Type":"application/json",...authH()},body:JSON.stringify({message:q,session_id:ACTIVE_SESSION})});const j=await r.json();th.innerHTML='<div class="who">'+botName()+'</div>'+(j.reply||"—").replace(/</g,"&lt;");}catch(e){th.innerHTML='<div class="who">'+botName()+'</div>Сбой соединения, сэр.';}}
   // ---- MCP: external tool servers, managed in the app config -------------
   // The list of servers lives in the app config and is edited through the
   // native bridge; the engine picks it up on the next rebuild. Live status
@@ -1617,6 +1667,57 @@
   }
   function openBot(){ window.open("https://t.me/jar_v1_s","_blank"); }
 
+  // ---- Devices: Device Manager (Этап 2 / Фаза A4 backend, B4 UI) ---------
+  // Live desktop-control connections (DeviceRegistry) merged server-side
+  // with every login session ever issued to the account
+  // (LicenseService.list_sessions, Фаза A2) — this panel is the first place
+  // either becomes visible to a person, not just to the server's own code.
+  const CLIENT_TYPE_RU={desktop:"Desktop",web:"Веб",mobile:"Мобильный",telegram:"Telegram"};
+  async function loadDevices(){
+    const box=$("devicesPanel"); if(!box) return;
+    if(!NATIVE){box.innerHTML=panelInfo("Устройства","Доступно в приложении KER.");return;}
+    const r=await nat("devices.list");
+    if(!r||!r.ok){box.innerHTML=panelInfo("Устройства",
+      (r&&r.error)||"Не удалось получить список устройств.");return;}
+    renderDevices(r);
+  }
+  function renderDevices(data){
+    const box=$("devicesPanel"); if(!box) return;
+    const sessions=data.sessions||[], live=data.live_devices||[];
+    const liveCaps={};
+    live.forEach(d=>{ if(d.device_id) liveCaps[d.device_id]=d.capabilities||[]; });
+    const when=t=>t?new Date(t*1000).toLocaleString("ru"):"—";
+    const rows=sessions.length?sessions.map(s=>{
+      const isCurrent=!!s.device_id && s.device_id===data.current_device_id;
+      const name=esc(s.device_name||(s.device_id?("Устройство "+s.device_id.slice(0,8)):"Неизвестное устройство"));
+      const kind=esc(CLIENT_TYPE_RU[s.client_type]||s.client_type||"—");
+      const plat=s.platform?(" · "+esc(s.platform)):"";
+      const status=s.online?'<span class="badge up">В СЕТИ</span>'
+        :`<span class="d">последний раз: ${when(s.last_seen_at||s.created_at)}</span>`;
+      const caps=(liveCaps[s.device_id]||[]).length
+        ?`<div class="d">Может: ${esc(liveCaps[s.device_id].join(", "))}</div>`:"";
+      return `<div class="set-row">
+          <div><div class="t">${name}${isCurrent?' <span class="tag pop">это устройство</span>':""}</div>
+            <div class="d">${kind}${plat} · вход ${when(s.created_at)}</div>
+            ${caps}
+            <div style="margin-top:4px">${status}</div></div>
+          <button class="btn" onclick="revokeDevice('${esc(s.id)}',${isCurrent})">Завершить сессию</button></div>`;
+    }).join("") : '<div class="set-row"><div class="d">Ни одного входа пока не было.</div></div>';
+    box.innerHTML = `<div class="card"><header><h3>Устройства и сессии</h3></header><div class="body">
+        ${rows}
+      </div></div>`;
+  }
+  async function revokeDevice(id, isCurrent){
+    if(isCurrent && !confirm(
+      "Это текущее устройство. Завершить сессию? Чтобы продолжить работу, "+
+      "приложение нужно будет перезапустить и войти заново.")) return;
+    const r=await nat("devices.revoke",{id});
+    if(r&&r.ok){
+      if(isCurrent) toast("Сессия завершена — перезапустите приложение, чтобы войти снова");
+      else { renderDevices(r); toast("Сессия завершена"); }
+    } else toast((r&&r.error)||"Не удалось завершить сессию","bad");
+  }
+
   // ---- API keys: the credential behind "API от меня" ---------------------
   // The secret is shown once, at creation — after that only its short prefix
   // ever comes back, exactly as the server stores it. Everything here goes
@@ -1715,6 +1816,59 @@ model:    claude | gpt | openrouter | vendor/model</pre>
     if(navigator.clipboard&&navigator.clipboard.writeText)
       navigator.clipboard.writeText(el.value).then(done,()=>{document.execCommand("copy");done();});
     else { document.execCommand("copy"); done(); }
+  }
+
+  // ---- Profile: account identity + password change (Этап 2 / Фаза B5) ----
+  // Identity comes from PLAN (plan.get, already loaded for the Plan screen)
+  // instead of being invented here — one source of truth for who is signed in.
+  async function loadProfile(){
+    const box=$("profilePanel"); if(!box) return;
+    await loadPlan();
+    renderProfile();
+  }
+  function renderProfile(){
+    const box=$("profilePanel"); if(!box) return;
+    const name=esc(PLAN.username||"Sir");
+    const tier=esc(TIER_RU[PLAN.tier]||PLAN.tier||"—");
+    const identity=`<div class="card profile"><div class="body" style="display:flex; gap:18px; align-items:center">
+        <div class="av">🧑‍🚀</div>
+        <div><div style="font-weight:800; font-size:18px">${name}</div>
+          <div style="color:var(--muted); font-size:13px">${NATIVE?"Аккаунт на сервере":"Локальный аккаунт"}</div>
+          <div style="margin-top:10px; display:flex; gap:8px">
+            <span class="tag pop">${tier}</span>
+            ${PLAN.owner?'<span class="tag">Владелец</span>':""}
+          </div></div>
+      </div></div>`;
+    // No server account (open/shared-key mode) means no password to change.
+    const canChangePassword = NATIVE && !!PLAN.username;
+    const passwordCard = canChangePassword ? `<div class="card"><header><h3>Сменить пароль</h3></header><div class="body">
+        <div class="set-row" style="gap:10px; flex-wrap:wrap">
+          <input id="pwCurrent" type="password" placeholder="Текущий пароль" style="flex:1; min-width:180px">
+        </div>
+        <div class="set-row" style="gap:10px; flex-wrap:wrap; margin-top:8px">
+          <input id="pwNew" type="password" placeholder="Новый пароль" style="flex:1; min-width:180px">
+          <input id="pwNew2" type="password" placeholder="Повторите новый пароль" style="flex:1; min-width:180px">
+        </div>
+        <div class="set-row" style="margin-top:10px">
+          <div class="d">Другие устройства останутся в системе — завершить их можно на экране «Устройства».</div>
+          <button class="btn primary" onclick="changePassword()">Сменить пароль</button></div>
+      </div></div>` : "";
+    box.innerHTML = identity + passwordCard;
+  }
+  async function changePassword(){
+    const cur=($("pwCurrent")&&$("pwCurrent").value)||"";
+    const n1=($("pwNew")&&$("pwNew").value)||"";
+    const n2=($("pwNew2")&&$("pwNew2").value)||"";
+    if(!cur||!n1){ toast("Заполните оба поля пароля","bad"); return; }
+    if(n1!==n2){ toast("Новые пароли не совпадают","bad"); return; }
+    const r=await nat("account.change_password",
+      {current_password:cur,new_password:n1,new_password2:n2});
+    if(r&&r.ok){
+      if($("pwCurrent")) $("pwCurrent").value="";
+      if($("pwNew")) $("pwNew").value="";
+      if($("pwNew2")) $("pwNew2").value="";
+      toast("Пароль изменён");
+    } else toast((r&&r.error)||"Не удалось сменить пароль","bad");
   }
 
   // ---- internet: the search backends the AI actually uses ----------------

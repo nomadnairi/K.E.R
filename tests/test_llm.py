@@ -98,3 +98,41 @@ async def test_stream_falls_back_before_first_chunk():
     client = LLMClient(primary=_AlwaysFails(), fallbacks=[_Works()])
     chunks = [c async for c in client.stream([{"role": "user", "content": "hi"}])]
     assert "".join(chunks) == "hello"
+
+
+# -- vision (screen sharing) --------------------------------------------------
+
+
+def test_vision_user_message_default_is_openai_content_parts():
+    # _Works doesn't override vision_user_message, so this exercises the
+    # LLMProvider base default (also used as-is by OpenAI/OpenRouter/local).
+    msg = _Works().vision_user_message("explain this", "YWJj")
+    assert msg["role"] == "user"
+    parts = msg["content"]
+    assert {"type": "text", "text": "explain this"} in parts
+    image_part = next(p for p in parts if p["type"] == "image_url")
+    assert image_part["image_url"]["url"] == "data:image/png;base64,YWJj"
+
+
+def test_anthropic_vision_user_message_uses_anthropic_block_shape():
+    from jarvis.llm.providers.anthropic_provider import AnthropicProvider
+
+    msg = AnthropicProvider(api_key="k", model="m").vision_user_message(
+        "explain this", "YWJj")
+    parts = msg["content"]
+    assert {"type": "text", "text": "explain this"} in parts
+    image_part = next(p for p in parts if p["type"] == "image")
+    assert image_part["source"] == {
+        "type": "base64", "media_type": "image/png", "data": "YWJj"}
+
+
+def test_provider_for_prefers_override_then_profile_then_primary():
+    primary = _Works()
+    profiled = _Works()
+    override = _Works()
+    client = LLMClient(primary=primary, profiles={"gpt": profiled})
+
+    assert client.provider_for() is primary
+    assert client.provider_for(profile="gpt") is profiled
+    assert client.provider_for(profile="gpt", override=override) is override
+    assert client.provider_for(profile="unknown") is primary

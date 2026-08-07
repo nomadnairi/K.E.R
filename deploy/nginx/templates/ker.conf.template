@@ -1,0 +1,181 @@
+# K.E.R. — Nginx server blocks.
+#
+# Rendered to /etc/nginx/conf.d/ker.conf at container start by the official
+# nginx image's built-in envsubst templating (files under
+# /etc/nginx/templates/*.template get $VARS substituted automatically — no
+# custom entrypoint logic needed for this part). Variables come from the
+# nginx service's `environment:` in docker-compose.prod.yml, which reads
+# ${DOMAIN} from .env.
+#
+# Only ${DOMAIN} is substituted here (envsubst substitutes every $VAR by
+# default, which would also mangle Nginx's own $host/$uri/etc. variables) —
+# the compose service passes an explicit allow-list via
+# NGINX_ENVSUBST_FILTER, see docker-compose.prod.yml.
+#
+# Layout:
+#   ${DOMAIN}            → the official site (static), API under /api/
+#   www.${DOMAIN}        → redirects to the apex
+#   dashboard.${DOMAIN}  → the web dashboard (static SPA), calls the API above
+#
+# The site and the API share one origin, so the dashboard's session cookie is
+# scoped to .${DOMAIN} and works across both without CORS gymnastics.
+
+upstream api_backend {
+    server api:8000;
+    keepalive 32;
+}
+
+# -- plain HTTP: ACME challenge + redirect to HTTPS --------------------------
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN} www.${DOMAIN} dashboard.${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# -- www → apex ---------------------------------------------------------------
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name www.${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    include /etc/nginx/snippets/ssl-params.conf;
+
+    return 301 https://${DOMAIN}$request_uri;
+}
+
+# -- the official site + the API ----------------------------------------------
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    include /etc/nginx/snippets/ssl-params.conf;
+    include /etc/nginx/snippets/security-headers.conf;
+
+    root /var/www/site;
+    index index.html;
+
+    # -- WebSockets ------------------------------------------------------------
+    # Declared before the generic /api/ block: nginx prefers an exact (=) match
+    # and a longer prefix, but keeping these first also keeps them obvious.
+
+    # Chat streaming socket (@app.websocket("/ws/{session_id}")).
+    location /api/ws/ {
+        proxy_pass http://api_backend/ws/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+    }
+
+    # The device relay: the desktop app and headless agents (a Raspberry Pi
+    # later) hold this open so the server can ask them to act on their own
+    # machine.
+    location = /api/device/ws {
+        proxy_pass http://api_backend/device/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+    }
+
+    # Live dashboard socket.
+    location = /api/dashboard/ws {
+        proxy_pass http://api_backend/dashboard/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+    }
+
+    # -- REST API --------------------------------------------------------------
+    # Everything the clients talk to lives under /api/. The trailing slash on
+    # proxy_pass strips the prefix, so the application's own routes are
+    # unchanged and a client simply points its base URL at
+    # https://${DOMAIN}/api
+    location /api/ {
+        proxy_pass http://api_backend/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+    }
+
+    # -- static site -----------------------------------------------------------
+    # Vite emits hashed filenames under /assets, so they can be cached forever.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # index.html must never be cached, or a deploy would not reach browsers
+    # still holding the previous copy.
+    location = /index.html {
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
+    # A client-side router owns the URLs: unknown paths return index.html and
+    # React decides (including its own 404). Without this, a hard refresh on a
+    # real page like /pricing would 404.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+
+# -- the web dashboard --------------------------------------------------------
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name dashboard.${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    include /etc/nginx/snippets/ssl-params.conf;
+    include /etc/nginx/snippets/security-headers.conf;
+
+    root /var/www/dashboard;
+    index index.html;
+
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

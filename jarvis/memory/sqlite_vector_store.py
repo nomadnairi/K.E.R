@@ -22,7 +22,12 @@ from datetime import datetime, timezone
 from math import exp
 from pathlib import Path
 
-from jarvis.memory.base import BaseEmbedder, BaseMemoryStore, MemoryRecord
+from jarvis.memory.base import (
+    BaseEmbedder,
+    BaseMemoryStore,
+    MemoryRecord,
+    like_prefix_pattern,
+)
 from jarvis.memory.embeddings import cosine_similarity
 from jarvis.security.crypto import KeyProvider, SecretBox
 from jarvis.utils.logger import get_logger
@@ -141,11 +146,15 @@ class SQLiteVectorStore(BaseMemoryStore):
     # -- read ---------------------------------------------------------------
 
     def recall(self, query: str, *, session_id: str | None = "default",
+            session_prefix: str | None = None,
             limit: int = 5) -> list[MemoryRecord]:
         q = self.embedder.embed(query)
-        if session_id is None:
+        if session_prefix is not None:
+            sql = "SELECT * FROM memories WHERE session_id LIKE ? ESCAPE '\\'"
+            params: tuple = (like_prefix_pattern(session_prefix),)
+        elif session_id is None:
             sql = "SELECT * FROM memories"
-            params: tuple = ()
+            params = ()
         else:
             sql = "SELECT * FROM memories WHERE session_id = ?"
             params = (session_id,)
@@ -186,9 +195,14 @@ class SQLiteVectorStore(BaseMemoryStore):
 
     # -- delete -------------------------------------------------------------
 
-    def forget(self, session_id: str | None = "default") -> None:
+    def forget(self, session_id: str | None = "default", *,
+            session_prefix: str | None = None) -> None:
         with self._lock:
-            if session_id is None:
+            if session_prefix is not None:
+                self._conn.execute(
+                    "DELETE FROM memories WHERE session_id LIKE ? ESCAPE '\\'",
+                    (like_prefix_pattern(session_prefix),))
+            elif session_id is None:
                 self._conn.execute("DELETE FROM memories")
             else:
                 self._conn.execute(
@@ -196,24 +210,39 @@ class SQLiteVectorStore(BaseMemoryStore):
                 )
             self._conn.commit()
 
-    def delete(self, record_id: int) -> bool:
-        """Remove one memory by id."""
+    def delete(self, record_id: int, *, session_prefix: str | None = None) -> bool:
+        """Remove one memory by id.
+
+        With ``session_prefix`` set, the delete only takes effect if the
+        record's own session belongs to that prefix — so a caller cannot
+        remove another tenant's memory by guessing or incrementing an id.
+        """
         with self._lock:
-            cur = self._conn.execute("DELETE FROM memories WHERE id = ?",
-                                    (int(record_id),))
+            if session_prefix is not None:
+                cur = self._conn.execute(
+                    "DELETE FROM memories WHERE id = ? AND session_id LIKE ? "
+                    "ESCAPE '\\'",
+                    (int(record_id), like_prefix_pattern(session_prefix)))
+            else:
+                cur = self._conn.execute("DELETE FROM memories WHERE id = ?",
+                                        (int(record_id),))
             self._conn.commit()
         return cur.rowcount > 0
 
     # -- introspection ------------------------------------------------------
 
-    def browse(self, *, session_id: str | None = None, limit: int = 100,
+    def browse(self, *, session_id: str | None = None,
+            session_prefix: str | None = None, limit: int = 100,
             offset: int = 0) -> list[MemoryRecord]:
         """Stored memories, newest first — what a person is actually shown."""
         limit = max(1, min(int(limit), 500))
         offset = max(0, int(offset))
         sql = "SELECT * FROM memories"
         params: tuple = ()
-        if session_id is not None:
+        if session_prefix is not None:
+            sql += " WHERE session_id LIKE ? ESCAPE '\\'"
+            params = (like_prefix_pattern(session_prefix),)
+        elif session_id is not None:
             sql += " WHERE session_id = ?"
             params = (session_id,)
         sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
@@ -239,9 +268,15 @@ class SQLiteVectorStore(BaseMemoryStore):
     def can_browse(self) -> bool:
         return True
 
-    def count(self, session_id: str | None = None) -> int:
+    def count(self, session_id: str | None = None, *,
+            session_prefix: str | None = None) -> int:
         with self._lock:
-            if session_id is None:
+            if session_prefix is not None:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) AS n FROM memories WHERE session_id LIKE ? "
+                    "ESCAPE '\\'", (like_prefix_pattern(session_prefix),),
+                ).fetchone()
+            elif session_id is None:
                 row = self._conn.execute(
                     "SELECT COUNT(*) AS n FROM memories"
                 ).fetchone()

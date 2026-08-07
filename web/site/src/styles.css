@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* One theme, committed to — the product is a dark tool, not a site with a
+     light mode bolted on. */
+  body {
+    @apply bg-base font-sans text-body text-text-body antialiased;
+  }
+
+  ::selection {
+    @apply bg-accent/25 text-text;
+  }
+
+  /* Focus is never removed, only restyled — keyboard users need to see it. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-base;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply text-text;
+    text-wrap: balance;
+  }
+}
+
+@layer utilities {
+  /* Caps body copy at a readable measure without hand-tuning widths. */
+  .prose-measure {
+    max-width: 34rem;
+  }
+
+  /* The technical grid behind the hero, fading out toward the edges. */
+  .bg-tech-grid {
+    background-image:
+      linear-gradient(theme('colors.border') 1px, transparent 1px),
+      linear-gradient(90deg, theme('colors.border') 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 30%, transparent 75%);
+  }
+}
+
+/* Every motion in this build is decorative; honour the OS preference. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

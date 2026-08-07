@@ -107,6 +107,17 @@ class AnthropicProvider(LLMProvider):
                 details={"model": use_model},
             ) from exc
 
+    def vision_user_message(self, text: str, image_b64: str,
+                            mime: str = "image/png") -> dict:
+        return {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": text},
+                {"type": "image",
+                "source": {"type": "base64", "media_type": mime, "data": image_b64}},
+            ],
+        }
+
     def continuation_messages(
         self,
         result: LLMResult,

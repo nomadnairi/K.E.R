@@ -20,6 +20,9 @@ import hmac
 from jarvis.config.settings import Settings
 from jarvis.licensing import AuthError, LicenseService
 
+#: Name of the browser session cookie the web dashboard signs in with.
+SESSION_COOKIE = "ker_session"
+
 #: Principal used when the caller authenticated with the shared API key.
 SHARED_PRINCIPAL = "shared"
 
@@ -135,7 +138,7 @@ def profile_for(account, settings: Settings, service: LicenseService | None,
 
 def install_auth_routes(app, settings: Settings, service: LicenseService) -> None:
     """Register /auth/* and /admin/* routes on *app*."""
-    from fastapi import APIRouter, Depends, Header, HTTPException
+    from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response
     from pydantic import BaseModel
 
     router = APIRouter()
@@ -143,6 +146,14 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
     class LoginIn(BaseModel):
         username: str
         password: str
+        # Optional device metadata (Этап 2 / Фаза B1) — a client that sends
+        # them lets the account see *what* is logged in (Device Manager);
+        # one that doesn't (every pre-existing client) behaves exactly as
+        # before, since issue_token() treats them as optional too.
+        device_id: str | None = None
+        device_name: str = ""
+        platform: str = ""
+        client_type: str = ""
 
     class TokenOut(BaseModel):
         token: str
@@ -167,16 +178,29 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
         code: str
         expires_in: int
 
-    def _bearer(authorization: str | None, x_api_key: str | None) -> str | None:
+    def _bearer(authorization: str | None, x_api_key: str | None,
+                session: str | None = None) -> str | None:
+        """The caller's token, from whichever transport it arrived on.
+
+        Three clients, three habits, one kind of token:
+        * ``Authorization: Bearer`` — the desktop app and the CLI,
+        * ``X-API-Key`` — long-lived keys (headless agents, Raspberry Pi),
+        * the ``ker_session`` cookie — the web dashboard.
+
+        The cookie comes last so an explicit header always wins: a browser
+        sends its cookie on every request, while a client that bothered to set
+        a header meant it.
+        """
         if authorization and authorization.startswith("Bearer "):
             return authorization[len("Bearer "):]
-        return x_api_key
+        return x_api_key or session
 
     async def current_account(
         authorization: str | None = Header(default=None),
         x_api_key: str | None = Header(default=None),
+        ker_session: str | None = Cookie(default=None),
     ):
-        token = _bearer(authorization, x_api_key)
+        token = _bearer(authorization, x_api_key, ker_session)
         account = service.validate_token(token) if token else None
         if account is None:
             raise HTTPException(status_code=401, detail="Invalid or expired token.")
@@ -220,7 +244,9 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
             account = service.create_account(username, body.password)
         except Exception as exc:  # noqa: BLE001 - reported to the caller
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        token = service.issue_token(account.id)
+        token = service.issue_token(
+            account.id, device_id=body.device_id, device_name=body.device_name,
+            platform=body.platform, client_type=body.client_type)
         return TokenOut(token=token,
                         expires_in=settings.auth_token_ttl_hours * 3600)
 
@@ -237,7 +263,9 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
                 status_code=403,
                 detail="Link your Telegram account before signing in.",
             )
-        token = service.issue_token(account.id)
+        token = service.issue_token(
+            account.id, device_id=body.device_id, device_name=body.device_name,
+            platform=body.platform, client_type=body.client_type)
         return TokenOut(token=token, expires_in=settings.auth_token_ttl_hours * 3600)
 
     @router.get("/auth/me", response_model=MeOut)
@@ -258,6 +286,37 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
     async def pairing_code(account=Depends(current_account)) -> PairingOut:
         code = service.create_pairing_code(account.id)
         return PairingOut(code=code, expires_in=600)
+
+    class ChangePasswordIn(BaseModel):
+        current_password: str
+        new_password: str
+
+    @router.post("/auth/change-password")
+    async def change_password(body: ChangePasswordIn,
+                            account=Depends(current_account)) -> dict:
+        """Change the signed-in account's password (Этап 2 / Фаза B5).
+
+        ``change_password()`` on :class:`LicenseService` already existed and
+        overwrites blindly — fine for the bot (which just proved control of
+        the Telegram account) and the admin CLI (which has the admin key),
+        but not for a person who only holds a bearer token: a session left
+        open on someone else's machine should not, by itself, be enough to
+        take over the account's login entirely. So this path re-checks the
+        current password before calling it, the same way changing a password
+        on any other account normally works.
+        """
+        try:
+            service.authenticate(account.username, body.current_password)
+        except AuthError as exc:
+            raise HTTPException(status_code=401,
+                                detail="Your current password is incorrect.") from exc
+        if len(body.new_password) < settings.auth_min_password_length:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The new password needs at least "
+                        f"{settings.auth_min_password_length} characters.")
+        service.change_password(account.username, body.new_password)
+        return {"status": "changed"}
 
     # -- API keys (the credential behind the hosted proxy) --------------------
     # Managed here because this is where an account is already resolved. The
@@ -289,13 +348,64 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
 
     @router.post("/auth/logout")
     async def logout(
+        response: Response,
         authorization: str | None = Header(default=None),
         x_api_key: str | None = Header(default=None),
+        ker_session: str | None = Cookie(default=None),
     ) -> dict:
-        token = _bearer(authorization, x_api_key)
+        token = _bearer(authorization, x_api_key, ker_session)
         if token:
             service.revoke_token(token)
+        response.delete_cookie(SESSION_COOKIE, path="/",
+                            domain=settings.session_cookie_domain or None)
         return {"status": "logged_out"}
+
+    # -- web session ----------------------------------------------------------
+    #
+    # The dashboard is a separate client from the desktop app, so it gets its
+    # own session rather than reusing a desktop token. Same Telegram code
+    # mechanism, different vessel: the token goes into an httpOnly cookie the
+    # page's JavaScript cannot read, because a token in localStorage is stolen
+    # by the first XSS that lands. Signing in on the web neither requires nor
+    # invalidates a desktop login.
+
+    class WebLoginIn(BaseModel):
+        code: str
+        device_id: str | None = None
+        device_name: str = ""
+        platform: str = ""
+
+    @router.post("/auth/web/session")
+    async def open_web_session(body: WebLoginIn, response: Response) -> dict:
+        """Exchange a bot-issued code for a browser session cookie."""
+        try:
+            result = service.redeem_telegram_login(
+                body.code, device_id=body.device_id, device_name=body.device_name,
+                platform=body.platform, client_type="web")
+        except AuthError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        if result is None:
+            raise HTTPException(status_code=401, detail="Invalid or expired code.")
+
+        token, username = result
+        response.set_cookie(
+            SESSION_COOKIE,
+            token,
+            max_age=settings.auth_token_ttl_hours * 3600,
+            httponly=True,
+            # Secure is dropped only for local development over plain HTTP;
+            # in production this rides HTTPS and must stay on.
+            secure=settings.session_cookie_secure,
+            samesite="lax",
+            path="/",
+            domain=settings.session_cookie_domain or None,
+        )
+        return {"username": username}
+
+    @router.get("/auth/web/session")
+    async def web_session_state(account=Depends(current_account)) -> dict:
+        """Who the browser is signed in as — used on dashboard boot."""
+        return {"username": account.username, "authenticated": True}
 
     # -- admin (operator) -----------------------------------------------------
 

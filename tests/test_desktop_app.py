@@ -71,6 +71,22 @@ def test_config_survives_corrupt_file(tmp_path):
     assert AppConfig.load(tmp_path).language == "en"
 
 
+def test_ensure_device_id_mints_once_and_persists(tmp_path):
+    """Этап 2 / Фаза B1 — a stable per-install id for the Device Manager."""
+    config = AppConfig()
+    assert config.device_id == ""
+    first = config.ensure_device_id()
+    assert first  # a real uuid, not empty
+    # Calling again on the same instance must not mint a second one.
+    assert config.ensure_device_id() == first
+
+    config.save(tmp_path)
+    reloaded = AppConfig.load(tmp_path)
+    assert reloaded.device_id == first
+    # Loading an already-saved config must not mint a new id either.
+    assert reloaded.ensure_device_id() == first
+
+
 def test_settings_overrides_map_to_engine_settings():
     config = AppConfig(anthropic_api_key="k", allow_shell=True,
                     telegram_send_enabled=True, telegram_channel="@ch",
@@ -98,6 +114,67 @@ def test_tr_fallback_and_format():
 
 
 # -- API client ---------------------------------------------------------------
+
+
+def test_login_sends_device_fields_only_when_given():
+    """Этап 2 / Фаза B1 — omitted entirely with no device_id, present when
+    given, so an older embedder of this client changes nothing."""
+    client = JarvisApiClient("http://example.invalid")
+    seen: list[dict] = []
+    client._request = lambda method, path, body=None: (  # type: ignore[method-assign]
+        seen.append(body), {"token": "t"})[1]
+
+    client.login("tony", "secret")
+    assert "device_id" not in seen[-1]
+
+    client.login("tony", "secret", device_id="dev-1", device_name="PC",
+                platform="Windows", client_type="desktop")
+    assert seen[-1]["device_id"] == "dev-1"
+    assert seen[-1]["device_name"] == "PC"
+    assert seen[-1]["platform"] == "Windows"
+    assert seen[-1]["client_type"] == "desktop"
+
+
+def test_register_and_telegram_login_also_send_device_fields():
+    client = JarvisApiClient("http://example.invalid")
+    seen: list[dict] = []
+    client._request = lambda method, path, body=None: (  # type: ignore[method-assign]
+        seen.append(body), {"token": "t"})[1]
+
+    client.register("newbie", "secret", device_id="dev-2")
+    assert seen[-1]["device_id"] == "dev-2"
+
+    client.login_with_telegram_code("123456", device_id="dev-3")
+    assert seen[-1]["device_id"] == "dev-3"
+    assert seen[-1]["code"] == "123456"
+
+
+def test_list_and_revoke_devices_hit_the_right_endpoints():
+    """Этап 2 / Фаза B4 — the Device Manager panel's plumbing."""
+    client = JarvisApiClient("http://example.invalid")
+    calls: list[tuple] = []
+    client._request = lambda method, path, body=None: (  # type: ignore[method-assign]
+        calls.append((method, path, body)),
+        {"live_devices": [], "sessions": []})[1]
+
+    out = client.list_devices()
+    assert calls[-1] == ("GET", "/dashboard/devices", None)
+    assert out == {"live_devices": [], "sessions": []}
+
+    client.revoke_device("sess-1")
+    assert calls[-1] == ("POST", "/dashboard/devices/revoke", {"id": "sess-1"})
+
+
+def test_change_password_hits_the_right_endpoint():
+    """Этап 2 / Фаза B5."""
+    client = JarvisApiClient("http://example.invalid")
+    calls: list[tuple] = []
+    client._request = lambda method, path, body=None: (  # type: ignore[method-assign]
+        calls.append((method, path, body)), {})[1]
+
+    client.change_password("old-pass", "new-pass")
+    assert calls[-1] == ("POST", "/auth/change-password",
+                        {"current_password": "old-pass", "new_password": "new-pass"})
 
 
 def test_api_client_against_real_api():

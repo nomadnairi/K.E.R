@@ -71,23 +71,45 @@ class JarvisApiClient:
     def health(self) -> dict:
         return self._request("GET", "/health")
 
-    def login(self, username: str, password: str) -> str:
+    @staticmethod
+    def _device_fields(device_id: str | None, device_name: str,
+                    platform: str, client_type: str) -> dict:
+        """Device metadata for a login body (Этап 2 / Фаза B1).
+
+        Omitted entirely when no ``device_id`` was given, so a caller that
+        doesn't pass one (e.g. an older embedder of this client) sends the
+        exact same body as before this field existed.
+        """
+        if not device_id:
+            return {}
+        return {"device_id": device_id, "device_name": device_name,
+                "platform": platform, "client_type": client_type}
+
+    def login(self, username: str, password: str, *, device_id: str | None = None,
+            device_name: str = "", platform: str = "", client_type: str = "") -> str:
         """Sign in; stores and returns the bearer token."""
-        out = self._request("POST", "/auth/login",
-                            {"username": username, "password": password})
+        body = {"username": username, "password": password,
+                **self._device_fields(device_id, device_name, platform, client_type)}
+        out = self._request("POST", "/auth/login", body)
         self.token = out["token"]
         return self.token
 
-    def register(self, username: str, password: str) -> str:
+    def register(self, username: str, password: str, *, device_id: str | None = None,
+                device_name: str = "", platform: str = "", client_type: str = "") -> str:
         """Create an account and sign in with it; stores the token."""
-        out = self._request("POST", "/auth/register",
-                            {"username": username, "password": password})
+        body = {"username": username, "password": password,
+                **self._device_fields(device_id, device_name, platform, client_type)}
+        out = self._request("POST", "/auth/register", body)
         self.token = out["token"]
         return self.token
 
-    def login_with_telegram_code(self, code: str) -> str:
+    def login_with_telegram_code(self, code: str, *, device_id: str | None = None,
+                                device_name: str = "", platform: str = "",
+                                client_type: str = "") -> str:
         """Sign in with a bot-issued Telegram login code; stores the token."""
-        out = self._request("POST", "/auth/telegram", {"code": code.strip()})
+        body = {"code": code.strip(),
+                **self._device_fields(device_id, device_name, platform, client_type)}
+        out = self._request("POST", "/auth/telegram", body)
         self.token = out["token"]
         return self.token
 
@@ -103,6 +125,18 @@ class JarvisApiClient:
     def pairing_code(self) -> str:
         """Get a code to link Telegram (send /link CODE to the bot)."""
         return self._request("POST", "/auth/pairing-code")["code"]
+
+    def change_password(self, current_password: str, new_password: str) -> None:
+        """Change the signed-in account's password (Этап 2 / Фаза B5).
+
+        Raises :class:`ApiError` (401) if *current_password* is wrong —
+        the server re-checks it even though this call already carries a
+        valid token, so a left-open session alone can't take over the
+        login.
+        """
+        self._request("POST", "/auth/change-password",
+                    {"current_password": current_password,
+                    "new_password": new_password})
 
     # -- API keys (the credential behind the hosted proxy) --------------------
 
@@ -121,6 +155,18 @@ class JarvisApiClient:
     def proxy_usage(self) -> dict:
         """Today's proxy token spend vs the tier's ceiling."""
         return self._request("GET", "/v1/usage")
+
+    # -- devices (Device Manager — Этап 2 / Фаза A4 backend, B4 UI) -----------
+
+    def list_devices(self) -> dict:
+        """This account's devices: live desktop-control connections merged
+        with every login session ever issued to it."""
+        return self._request("GET", "/dashboard/devices")
+
+    def revoke_device(self, session_id: str) -> None:
+        """End one of this account's own sessions (a lost phone, an old
+        laptop, ...) — effective on that device's very next request."""
+        self._request("POST", "/dashboard/devices/revoke", {"id": session_id})
 
     def chat(self, message: str, session_id: str = "desktop") -> str:
         out = self._request("POST", "/chat",
