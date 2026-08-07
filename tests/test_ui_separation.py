@@ -191,3 +191,36 @@ def test_devices_screen_marks_the_current_device_and_confirms_before_self_logout
     revoke_fn = html.split("async function revokeDevice")[1].split("\n\n")[0]
     assert "confirm(" in revoke_fn
     assert "isCurrent" in revoke_fn
+
+
+# -- the profile screen: identity + password change (Этап 2 / Фаза B5) ------
+
+
+def test_the_profile_screen_shows_real_identity_from_the_plan():
+    """It used to be a static "Sir / Pro / Владелец" card — identity now
+    comes from PLAN (plan.get), the same source of truth the Plan screen
+    already uses, not invented markup."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert 'id="view-profile"' in html
+    assert "loadProfile" in html and "renderProfile" in html
+    render_fn = html.split("function renderProfile")[1].split("function ")[0]
+    assert "PLAN.username" in render_fn
+    assert "PLAN.owner" in render_fn
+
+
+def test_the_profile_screen_has_a_working_password_change_form():
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert "account.change_password" in html
+    assert 'id="pwCurrent"' in html and 'id="pwNew"' in html and 'id="pwNew2"' in html
+    change_fn = html.split("async function changePassword")[1].split("\n\n")[0]
+    # New password confirmation is checked client-side before ever calling
+    # the bridge — the server also enforces it, but failing fast is kinder.
+    assert "n1!==n2" in change_fn or "n1 !== n2" in change_fn
+
+
+def test_the_password_form_is_hidden_without_a_server_account():
+    """Open/shared-key mode (no accounts) has no password to change."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    render_fn = html.split("function renderProfile")[1].split("function ")[0]
+    assert "canChangePassword" in render_fn
+    assert "PLAN.username" in render_fn.split("canChangePassword")[1].split(";")[0]

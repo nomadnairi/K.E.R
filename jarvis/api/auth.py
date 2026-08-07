@@ -287,6 +287,37 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
         code = service.create_pairing_code(account.id)
         return PairingOut(code=code, expires_in=600)
 
+    class ChangePasswordIn(BaseModel):
+        current_password: str
+        new_password: str
+
+    @router.post("/auth/change-password")
+    async def change_password(body: ChangePasswordIn,
+                            account=Depends(current_account)) -> dict:
+        """Change the signed-in account's password (Этап 2 / Фаза B5).
+
+        ``change_password()`` on :class:`LicenseService` already existed and
+        overwrites blindly — fine for the bot (which just proved control of
+        the Telegram account) and the admin CLI (which has the admin key),
+        but not for a person who only holds a bearer token: a session left
+        open on someone else's machine should not, by itself, be enough to
+        take over the account's login entirely. So this path re-checks the
+        current password before calling it, the same way changing a password
+        on any other account normally works.
+        """
+        try:
+            service.authenticate(account.username, body.current_password)
+        except AuthError as exc:
+            raise HTTPException(status_code=401,
+                                detail="Your current password is incorrect.") from exc
+        if len(body.new_password) < settings.auth_min_password_length:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The new password needs at least "
+                        f"{settings.auth_min_password_length} characters.")
+        service.change_password(account.username, body.new_password)
+        return {"status": "changed"}
+
     # -- API keys (the credential behind the hosted proxy) --------------------
     # Managed here because this is where an account is already resolved. The
     # keys are only useful with the proxy (see jarvis/api/proxy_routes.py), but

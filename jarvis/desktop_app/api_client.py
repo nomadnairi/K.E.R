@@ -126,6 +126,18 @@ class JarvisApiClient:
         """Get a code to link Telegram (send /link CODE to the bot)."""
         return self._request("POST", "/auth/pairing-code")["code"]
 
+    def change_password(self, current_password: str, new_password: str) -> None:
+        """Change the signed-in account's password (Этап 2 / Фаза B5).
+
+        Raises :class:`ApiError` (401) if *current_password* is wrong —
+        the server re-checks it even though this call already carries a
+        valid token, so a left-open session alone can't take over the
+        login.
+        """
+        self._request("POST", "/auth/change-password",
+                    {"current_password": current_password,
+                    "new_password": new_password})
+
     # -- API keys (the credential behind the hosted proxy) --------------------
 
     def list_api_keys(self) -> list[dict]:

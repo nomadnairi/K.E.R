@@ -51,6 +51,10 @@ def default_limits(capacity: int, window_seconds: float) -> tuple[RouteLimit, ..
         RouteLimit("POST", "/auth/register", capacity, window_seconds),
         RouteLimit("POST", "/auth/telegram", capacity, window_seconds),
         RouteLimit("POST", "/auth/web/session", capacity, window_seconds),
+        # Re-checks the current password (Этап 2 / Фаза B5) — a stolen
+        # bearer token alone should not buy an attacker unlimited guesses
+        # at the real password behind it.
+        RouteLimit("POST", "/auth/change-password", capacity, window_seconds),
     )
 
 

@@ -779,13 +779,9 @@
       </div>
     </section>
 
-    <!-- PROFILE -->
+    <!-- PROFILE (Этап 2 / Фаза B5) -->
     <section class="view" id="view-profile" hidden>
-      <div class="card profile"><div class="body" style="display:flex; gap:18px; align-items:center">
-        <div class="av">🧑‍🚀</div>
-        <div><div style="font-weight:800; font-size:18px">Sir</div><div style="color:var(--muted); font-size:13px">Локальный аккаунт</div>
-          <div style="margin-top:10px; display:flex; gap:8px"><span class="tag pop">Pro</span><span class="tag">Владелец</span></div></div>
-      </div></div>
+      <div class="spanel" id="profilePanel">Загрузка…</div>
     </section>
 
     <!-- ABOUT -->
@@ -926,7 +922,7 @@
     if(v==="chat") loadSessions(); if(v==="logs") loadLogs();
     if(v==="internet") loadNet(); if(v==="memory") loadMemory();
     if(v==="plan") loadPlanScreen(); if(v==="apikeys") loadApiKeys();
-    if(v==="devices") loadDevices();
+    if(v==="devices") loadDevices(); if(v==="profile") loadProfile();
     if(v==="mcp") loadMcp();}
 
   function authH(){return CFG.key?{"X-API-Key":CFG.key,"Authorization":"Bearer "+CFG.key}:{};}
@@ -1773,6 +1769,59 @@ model:    claude | gpt | openrouter | vendor/model</pre>
     if(navigator.clipboard&&navigator.clipboard.writeText)
       navigator.clipboard.writeText(el.value).then(done,()=>{document.execCommand("copy");done();});
     else { document.execCommand("copy"); done(); }
+  }
+
+  // ---- Profile: account identity + password change (Этап 2 / Фаза B5) ----
+  // Identity comes from PLAN (plan.get, already loaded for the Plan screen)
+  // instead of being invented here — one source of truth for who is signed in.
+  async function loadProfile(){
+    const box=$("profilePanel"); if(!box) return;
+    await loadPlan();
+    renderProfile();
+  }
+  function renderProfile(){
+    const box=$("profilePanel"); if(!box) return;
+    const name=esc(PLAN.username||"Sir");
+    const tier=esc(TIER_RU[PLAN.tier]||PLAN.tier||"—");
+    const identity=`<div class="card profile"><div class="body" style="display:flex; gap:18px; align-items:center">
+        <div class="av">🧑‍🚀</div>
+        <div><div style="font-weight:800; font-size:18px">${name}</div>
+          <div style="color:var(--muted); font-size:13px">${NATIVE?"Аккаунт на сервере":"Локальный аккаунт"}</div>
+          <div style="margin-top:10px; display:flex; gap:8px">
+            <span class="tag pop">${tier}</span>
+            ${PLAN.owner?'<span class="tag">Владелец</span>':""}
+          </div></div>
+      </div></div>`;
+    // No server account (open/shared-key mode) means no password to change.
+    const canChangePassword = NATIVE && !!PLAN.username;
+    const passwordCard = canChangePassword ? `<div class="card"><header><h3>Сменить пароль</h3></header><div class="body">
+        <div class="set-row" style="gap:10px; flex-wrap:wrap">
+          <input id="pwCurrent" type="password" placeholder="Текущий пароль" style="flex:1; min-width:180px">
+        </div>
+        <div class="set-row" style="gap:10px; flex-wrap:wrap; margin-top:8px">
+          <input id="pwNew" type="password" placeholder="Новый пароль" style="flex:1; min-width:180px">
+          <input id="pwNew2" type="password" placeholder="Повторите новый пароль" style="flex:1; min-width:180px">
+        </div>
+        <div class="set-row" style="margin-top:10px">
+          <div class="d">Другие устройства останутся в системе — завершить их можно на экране «Устройства».</div>
+          <button class="btn primary" onclick="changePassword()">Сменить пароль</button></div>
+      </div></div>` : "";
+    box.innerHTML = identity + passwordCard;
+  }
+  async function changePassword(){
+    const cur=($("pwCurrent")&&$("pwCurrent").value)||"";
+    const n1=($("pwNew")&&$("pwNew").value)||"";
+    const n2=($("pwNew2")&&$("pwNew2").value)||"";
+    if(!cur||!n1){ toast("Заполните оба поля пароля","bad"); return; }
+    if(n1!==n2){ toast("Новые пароли не совпадают","bad"); return; }
+    const r=await nat("account.change_password",
+      {current_password:cur,new_password:n1,new_password2:n2});
+    if(r&&r.ok){
+      if($("pwCurrent")) $("pwCurrent").value="";
+      if($("pwNew")) $("pwNew").value="";
+      if($("pwNew2")) $("pwNew2").value="";
+      toast("Пароль изменён");
+    } else toast((r&&r.error)||"Не удалось сменить пароль","bad");
   }
 
   // ---- internet: the search backends the AI actually uses ----------------

@@ -104,6 +104,13 @@ class FakeClient:
         self._sessions = [s for s in getattr(self, "_sessions", self.list_devices()["sessions"])
                         if s["id"] != session_id]
 
+    # -- account --------------------------------------------------------------
+
+    def change_password(self, current_password: str, new_password: str) -> None:
+        self.calls.append(("change_password", current_password, new_password))
+        if current_password == "wrong":
+            raise ApiError(401, "Your current password is incorrect.")
+
 
 class UnreachableClient(FakeClient):
     """A server that answers the login but is gone by the time we ask again."""
@@ -593,6 +600,49 @@ def test_revoking_a_device_without_an_id_is_refused(bridge):
     bridge.handle("login.password", {"server": "http://localhost:8000",
                                     "username": "ann", "password": "secret"})
     assert bridge.handle("devices.revoke", {})["ok"] is False
+
+
+# -- account: change password (Этап 2 / Фаза B5) -----------------------------
+
+
+def test_change_password_needs_a_signed_in_client(bridge):
+    out = bridge.handle("account.change_password",
+                        {"current_password": "x", "new_password": "y"})
+    assert out["ok"] is False
+
+
+def test_change_password_forwards_to_the_client(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    out = bridge.handle("account.change_password",
+                        {"current_password": "secret", "new_password": "newpass1"})
+    assert out == {"ok": True}
+
+
+def test_change_password_reports_a_wrong_current_password(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    out = bridge.handle("account.change_password",
+                        {"current_password": "wrong", "new_password": "newpass1"})
+    assert out == {"ok": False, "error": "Your current password is incorrect."}
+
+
+def test_change_password_needs_both_fields(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    assert bridge.handle("account.change_password",
+                        {"current_password": "", "new_password": "x"})["ok"] is False
+    assert bridge.handle("account.change_password",
+                        {"current_password": "x", "new_password": ""})["ok"] is False
+
+
+def test_change_password_rejects_mismatched_confirmation(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    out = bridge.handle("account.change_password",
+                        {"current_password": "secret", "new_password": "newpass1",
+                        "new_password2": "different"})
+    assert out["ok"] is False
 
 
 # -- MCP servers ------------------------------------------------------------

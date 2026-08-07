@@ -165,6 +165,18 @@ def test_list_and_revoke_devices_hit_the_right_endpoints():
     assert calls[-1] == ("POST", "/dashboard/devices/revoke", {"id": "sess-1"})
 
 
+def test_change_password_hits_the_right_endpoint():
+    """Этап 2 / Фаза B5."""
+    client = JarvisApiClient("http://example.invalid")
+    calls: list[tuple] = []
+    client._request = lambda method, path, body=None: (  # type: ignore[method-assign]
+        calls.append((method, path, body)), {})[1]
+
+    client.change_password("old-pass", "new-pass")
+    assert calls[-1] == ("POST", "/auth/change-password",
+                        {"current_password": "old-pass", "new_password": "new-pass"})
+
+
 def test_api_client_against_real_api():
     pytest.importorskip("fastapi")
     import threading

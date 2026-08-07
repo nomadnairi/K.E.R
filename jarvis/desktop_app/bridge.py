@@ -363,6 +363,27 @@ class Bridge:
         out["current_device_id"] = self.config.device_id
         return out
 
+    # -- account (Этап 2 / Фаза B5) --------------------------------------------
+
+    def _do_account_change_password(self, payload: dict) -> dict:
+        """Change the signed-in account's password.
+
+        The server re-checks the current password itself
+        (POST /auth/change-password) — this just forwards the two fields
+        and turns its 401 into the same ``{"ok": False, "error": ...}``
+        shape every other bridge action already returns.
+        """
+        if self.client is None:
+            return {"ok": False, "error": "Not signed in."}
+        current = str(payload.get("current_password", ""))
+        new = str(payload.get("new_password", ""))
+        if not current or not new:
+            return {"ok": False, "error": "Fill in both password fields."}
+        if new != str(payload.get("new_password2", new)):
+            return {"ok": False, "error": "The two new passwords do not match."}
+        self.client.change_password(current, new)
+        return {"ok": True}
+
     # -- MCP servers (Pro: external tool servers) -----------------------------
 
     def _mcp_doc(self) -> dict:

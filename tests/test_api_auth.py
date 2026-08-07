@@ -274,6 +274,72 @@ def test_a_taken_username_is_a_conflict_not_a_silent_takeover():
                         ).status_code == 200
 
 
+# -- change password (Этап 2 / Фаза B5) --------------------------------------
+#
+# change_password() on LicenseService already existed and overwrites
+# blindly — fine for the bot (already proved control of the Telegram
+# account) and the admin CLI (has the admin key), but a person who only
+# holds a bearer token needs the current password re-checked first, so a
+# session left open on someone else's machine can't take over the login.
+
+
+def test_change_password_requires_the_current_one():
+    with TestClient(_app()) as client:
+        _seed(client)
+        token = client.post("/auth/login",
+                            json={"username": "tony", "password": "arcreactor"}
+                            ).json()["token"]
+        r = client.post("/auth/change-password",
+                        json={"current_password": "wrong", "new_password": "newpassword1"},
+                        headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 401
+        # The old password still works — nothing was changed.
+        assert client.post("/auth/login",
+                        json={"username": "tony", "password": "arcreactor"}
+                        ).status_code == 200
+
+
+def test_change_password_succeeds_and_the_new_password_signs_in():
+    with TestClient(_app()) as client:
+        _seed(client)
+        token = client.post("/auth/login",
+                            json={"username": "tony", "password": "arcreactor"}
+                            ).json()["token"]
+        r = client.post("/auth/change-password",
+                        json={"current_password": "arcreactor",
+                            "new_password": "newpassword1"},
+                        headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200, r.text
+
+        assert client.post("/auth/login",
+                        json={"username": "tony", "password": "newpassword1"}
+                        ).status_code == 200
+        # The old password no longer works.
+        assert client.post("/auth/login",
+                        json={"username": "tony", "password": "arcreactor"}
+                        ).status_code == 401
+
+
+def test_change_password_refuses_a_short_new_password():
+    with TestClient(_app(auth_min_password_length=12)) as client:
+        _seed(client)
+        token = client.post("/auth/login",
+                            json={"username": "tony", "password": "arcreactor"}
+                            ).json()["token"]
+        r = client.post("/auth/change-password",
+                        json={"current_password": "arcreactor", "new_password": "short"},
+                        headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 400
+        assert "12" in r.json()["detail"]
+
+
+def test_change_password_requires_a_valid_session():
+    with TestClient(_app()) as client:
+        r = client.post("/auth/change-password",
+                        json={"current_password": "x", "new_password": "newpassword1"})
+        assert r.status_code == 401
+
+
 # -- device metadata (Этап 2 / Фаза B1) --------------------------------------
 #
 # LoginIn/_TgLoginIn grew optional device_id/device_name/platform/client_type

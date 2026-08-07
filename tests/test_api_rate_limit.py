@@ -77,6 +77,26 @@ def test_telegram_code_exchange_is_throttled():
         assert blocked.status_code == 429
 
 
+def test_change_password_is_throttled():
+    """Этап 2 / Фаза B5 — a stolen bearer token should not buy unlimited
+    guesses at the real password behind it."""
+    with TestClient(_app(capacity=3, auth_allow_signup=True)) as client:
+        client.post("/auth/register", json={"username": "ann", "password": "wonderland1"})
+        token = client.post("/auth/login",
+                            json={"username": "ann", "password": "wonderland1"}
+                            ).json()["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        for _ in range(3):
+            r = client.post("/auth/change-password",
+                            json={"current_password": "wrong", "new_password": "newpass123"},
+                            headers=headers)
+            assert r.status_code == 401  # wrong current password, not yet blocked
+        blocked = client.post("/auth/change-password",
+                            json={"current_password": "wrong", "new_password": "newpass123"},
+                            headers=headers)
+        assert blocked.status_code == 429
+
+
 def test_different_ips_get_independent_buckets(monkeypatch):
     with TestClient(_app(capacity=1)) as client:
         # Exhaust the default TestClient IP's bucket.
