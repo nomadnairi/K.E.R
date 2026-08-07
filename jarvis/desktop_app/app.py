@@ -289,6 +289,8 @@ def run_app() -> int:
             super().__init__()
             self.client = client
             self.engine_thread = None
+            from jarvis.desktop_app.notifications import NotificationCenter
+            self.notifications = NotificationCenter(NotificationCenter.default_path())
             self.bridge = ReplyBridge()
             self.bridge.done.connect(self._on_reply)
             self.bridge.chunk.connect(self._on_chunk)
@@ -959,17 +961,41 @@ def run_app() -> int:
                 last = self._messages[-1][1] if self._messages else ""
                 self._notify(reply or last)
 
+        def _push_notification(self, text: str, *, kind: str = "info") -> None:
+            """Single entry point for anything the user should hear about
+            unprompted: proactive messages today, update availability and
+            future AI Runtime events (agent started, goal finished, ...)
+            tomorrow — all through the same channel instead of a new ad hoc
+            mechanism each time.
+
+            Writes to the :class:`NotificationCenter` first — the toast
+            (WebView deck, or the OS tray) is a side effect of that record,
+            not the record itself, so nothing is lost if the window is
+            hidden or the page hasn't finished loading yet.
+            """
+            self.notifications.add(text, kind=kind)
+            view = getattr(self, "_deck_view", None)
+            if view is not None:
+                import json
+                view.page().runJavaScript(f"toast({json.dumps(text)})")
+            self._notify(text)
+
         def _on_proactive(self, text: str) -> None:
             """A message KER sent unprompted (local mode's ProactiveEngine).
 
             Runs on the GUI thread (Qt marshals the cross-thread emit safely,
-            same as every other bridge signal here) -- shows up like an
-            ordinary reply, not just a toast, since the user never asked for
-            it and might otherwise miss a transient notification entirely.
+            same as every other bridge signal here). ``self.transcript``
+            only exists in the native fallback build (no QtWebEngine) — the
+            deck/WebView build has no such widget, and touching it
+            unconditionally used to raise ``AttributeError`` inside this Qt
+            slot, which Qt swallows silently: proactive messages never
+            showed up anywhere in the shipped (WebView) build. Guarded the
+            same way :meth:`_append_system` already guards it.
             """
-            self._messages.append(("assistant", text))
-            self._render_chat()
-            self._notify(text)
+            if hasattr(self, "transcript"):
+                self._messages.append(("assistant", text))
+                self._render_chat()
+            self._push_notification(text, kind="proactive")
 
         # -- voice tab -----------------------------------------------------
 
