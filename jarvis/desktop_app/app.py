@@ -141,6 +141,48 @@ _MAX_RENDER = 150   # messages painted into the transcript widget
 _MAX_STORE = 400    # messages kept in memory
 
 
+def _boot_splash(theme: str):
+    """A themed :class:`QSplashScreen` for the boot sequence (Фаза B3).
+
+    Drawn, not shipped as an image asset — same reasoning as
+    :meth:`MainWindow._tray_icon`'s drawn fallback: it stays crisp at any
+    DPI and needs no file to go missing. Returns ``(None, no-op)`` if Qt
+    can't give us a splash for some reason (headless test runner, odd
+    platform) — every call site treats a ``None`` splash as "no boot UI",
+    not an error, since a boot sequence is a nicety, the window still comes
+    up either way.
+    """
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
+        from PySide6.QtWidgets import QSplashScreen
+
+        from jarvis.desktop_app.theme import THEMES, DEFAULT_THEME
+        palette = THEMES.get(theme, THEMES[DEFAULT_THEME])
+
+        width, height = 420, 240
+        pix = QPixmap(width, height)
+        pix.fill(QColor(palette["bg"]))
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QColor(palette["accent"]))
+        painter.setFont(QFont("Segoe UI", 28, QFont.Weight.Bold))
+        painter.drawText(pix.rect().adjusted(0, -30, 0, -30),
+                        Qt.AlignmentFlag.AlignCenter, "K.E.R.")
+        painter.end()
+
+        splash = QSplashScreen(pix)
+        align = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom
+        color = QColor(palette.get("text", "#f0f5ee"))
+
+        def update(text: str) -> None:
+            splash.showMessage(f"  {text}", align, color)
+
+        return splash, update
+    except Exception:  # noqa: BLE001 - a boot splash is a nicety, not a gate
+        return None, lambda _text: None
+
+
 def run_app() -> int:
     """Create the Qt application and run the main loop."""
     try:
@@ -1549,6 +1591,22 @@ def run_app() -> int:
         from PySide6.QtGui import QIcon
         app.setWindowIcon(QIcon(str(_icon)))
 
+    # Boot sequence (Этап 2 / Фаза B3): before this, the window between
+    # QApplication([]) and window.show() was a blank OS rectangle for as
+    # long as local-mode engine startup took (up to 30s, see
+    # EngineThread.start()) — no spinner, no text, nothing. AppStatus wraps
+    # the existing steps below with a visible stage each; it does not
+    # reorder or change any of them.
+    from jarvis.desktop_app.status import AppStatus, Stage
+    status = AppStatus()
+    splash, _splash_update = _boot_splash(config.theme)
+    if splash is not None:
+        status.on_change(lambda _stage, text: (_splash_update(text),
+                                            app.processEvents()))
+        splash.show()
+        status.set(Stage.CONNECTING)
+        app.processEvents()
+
     #: Filled in once the window exists, so saves made from the interface
     #: reach the app that has to act on them.
     window_ref: dict = {}
@@ -1589,8 +1647,14 @@ def run_app() -> int:
                             exc.detail)
                 client = candidate
                 bridge.client = candidate
+                if splash is not None:
+                    status.set(Stage.DEGRADED)
 
     if client is None:
+        # A modal sign-in dialog is about to take over the screen — the
+        # splash would just sit uselessly behind it.
+        if splash is not None:
+            splash.hide()
         if handler is not None:
             login = WebLoginWindow(handler)
             if login.exec() != QDialog.DialogCode.Accepted:
@@ -1601,10 +1665,23 @@ def run_app() -> int:
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return 0
             client = dialog.client
+        if splash is not None:
+            splash.show()
     config.mode = config.resolved_mode()
+
+    # Local mode runs the whole engine inside MainWindow's constructor,
+    # synchronously, on this same GUI thread (up to 30s cold —
+    # EngineThread.start()) — the one step in this sequence a splash text
+    # update actually has time to be seen for.
+    if splash is not None and config.mode == "local":
+        status.set(Stage.STARTING_ENGINE)
 
     window = MainWindow(client)
     window_ref["window"] = window
+    if splash is not None:
+        status.set(Stage.SYNCING)
+        status.set(Stage.READY)
+        splash.finish(window)
     window.show()
     window.maybe_onboard()
     return app.exec()
