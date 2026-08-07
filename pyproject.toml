@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvis-assistant"
-version = "1.6.0"
+version = "1.18.0"
 description = "J.A.R.V.I.S. — Just A Rather Very Intelligent System. A modular personal AI assistant framework."
 readme = "README.md"
 requires-python = ">=3.10"
