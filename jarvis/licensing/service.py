@@ -695,11 +695,15 @@ class LicenseService:
         self._conn.commit()
         return code
 
-    def redeem_telegram_login(self, code: str) -> tuple[str, str] | None:
+    def redeem_telegram_login(self, code: str, *, device_id: str | None = None,
+                            device_name: str = "", platform: str = "",
+                            client_type: str = "") -> tuple[str, str] | None:
         """Redeem a login code → (token, username).
 
         Creates an account bound to the Telegram user on first use, so a person
-        can sign in with Telegram alone (no password).
+        can sign in with Telegram alone (no password). The device fields are
+        optional (Фаза B1) — omitted by every pre-existing caller, which keeps
+        issuing the same anonymous-device token as before.
         """
         self._ensure_login_codes_table()
         code = (code or "").strip()
@@ -713,7 +717,9 @@ class LicenseService:
             "UPDATE tg_login_codes SET used = 1 WHERE code = ?", (code,))
         self._conn.commit()
         acc = self.ensure_account_for_telegram(tg)
-        return self.issue_token(acc.id), acc.username
+        token = self.issue_token(acc.id, device_id=device_id, device_name=device_name,
+                                platform=platform, client_type=client_type)
+        return token, acc.username
 
     def confirm_pairing(self, code: str, telegram_user_id: int) -> Account | None:
         """Bind *telegram_user_id* to the account for a valid pairing code."""

@@ -190,6 +190,20 @@ class Bridge:
 
     # -- signing in -----------------------------------------------------------
 
+    def _device_meta(self) -> dict:
+        """This install's device fields (Этап 2 / Фаза B1).
+
+        ``device_id`` is minted once and persisted; name/platform are read
+        fresh every time, since they describe the machine, not the account.
+        """
+        import platform as _platform
+        return {
+            "device_id": self.config.ensure_device_id(),
+            "device_name": _platform.node(),
+            "platform": _platform.system(),
+            "client_type": "desktop",
+        }
+
     def _do_login_password(self, payload: dict) -> dict:
         server = str(payload.get("server", "")).strip()
         username = str(payload.get("username", "")).strip()
@@ -197,7 +211,7 @@ class Bridge:
         if not server or not username or not password:
             return {"ok": False, "error": "Fill in server, username and password."}
         client = self._client_factory(server)
-        client.login(username, password)
+        client.login(username, password, **self._device_meta())
         return self._remember(client, username=username)
 
     def _do_server_probe(self, payload: dict) -> dict:
@@ -241,7 +255,7 @@ class Bridge:
         if password != str(payload.get("password2", password)):
             return {"ok": False, "error": "The two passwords do not match."}
         client = self._client_factory(server)
-        client.register(username, password)
+        client.register(username, password, **self._device_meta())
         return self._remember(client, username=username)
 
     def _do_login_telegram(self, payload: dict) -> dict:
@@ -250,7 +264,7 @@ class Bridge:
         if not server or not code:
             return {"ok": False, "error": "Enter the server and the login code."}
         client = self._client_factory(server)
-        client.login_with_telegram_code(code)
+        client.login_with_telegram_code(code, **self._device_meta())
         return self._remember(client)
 
     def _remember(self, client: JarvisApiClient, *, username: str = "") -> dict:

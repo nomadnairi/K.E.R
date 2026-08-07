@@ -34,22 +34,25 @@ class FakeClient:
         self.calls.append(("info",))
         return dict(self.server_info)
 
-    def login(self, username: str, password: str) -> str:
+    def login(self, username: str, password: str, **device) -> str:
         self.calls.append(("login", username, password))
+        self.last_device = device
         if password == "wrong":
             raise ApiError(401, "Bad credentials")
         self.token = "token-123"
         return self.token
 
-    def register(self, username: str, password: str) -> str:
+    def register(self, username: str, password: str, **device) -> str:
         self.calls.append(("register", username, password))
+        self.last_device = device
         if username == "taken":
             raise ApiError(409, "That username is taken.")
         self.token = "token-new"
         return self.token
 
-    def login_with_telegram_code(self, code: str) -> str:
+    def login_with_telegram_code(self, code: str, **device) -> str:
         self.calls.append(("telegram", code))
+        self.last_device = device
         if code == "000000":
             raise ApiError(400, "Code expired")
         self.token = "token-tg"
@@ -125,6 +128,25 @@ def test_password_sign_in_stores_the_token_and_the_plan(bridge, tmp_path):
     assert saved.role == "user"
     # Free has no local capabilities, so the engine is the server's.
     assert saved.mode == "remote"
+
+
+def test_password_sign_in_sends_and_persists_a_device_id(bridge, tmp_path):
+    """Этап 2 / Фаза B1 — the bridge mints and sends this install's device
+    id on every sign-in, so the account's Device Manager has something to
+    show, and the id survives a restart instead of changing every login."""
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    first_id = bridge.config.device_id
+    assert first_id
+    assert bridge.client.last_device["device_id"] == first_id
+    assert bridge.client.last_device["client_type"] == "desktop"
+    assert AppConfig.load(tmp_path).device_id == first_id
+
+    # A second sign-in (e.g. a different account on the same install) reuses
+    # the same device id rather than minting a new one each time.
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    assert bridge.client.last_device["device_id"] == first_id
 
 
 def test_password_sign_in_reports_the_server_error(bridge):

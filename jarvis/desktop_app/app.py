@@ -36,6 +36,24 @@ _FALLBACK_ADMIN_TABS = ("assistant", "capabilities", "integrations", "memory",
                         "general", "logs")
 
 
+def _device_meta(config: AppConfig) -> dict:
+    """This install's device fields for a login call (Этап 2 / Фаза B1).
+
+    Mirrors :meth:`jarvis.desktop_app.bridge.Bridge._device_meta` — the
+    native fallback login screen below talks to the API directly instead of
+    through the bridge, but a device signing in this way is exactly as real
+    as one signing in through the deck and deserves to show up the same way
+    in the account's Device Manager.
+    """
+    import platform as _platform
+    return {
+        "device_id": config.ensure_device_id(),
+        "device_name": _platform.node(),
+        "platform": _platform.system(),
+        "client_type": "desktop",
+    }
+
+
 def visible_tabs(role: str, *, webview: bool = True) -> tuple[str, ...]:
     """Ordered tab ids to show.
 
@@ -229,7 +247,7 @@ def run_app() -> int:
                 return
             client = JarvisApiClient(self.server.text().strip())
             try:
-                client.login_with_telegram_code(code.strip())
+                client.login_with_telegram_code(code.strip(), **_device_meta(config))
             except ApiError as exc:
                 QMessageBox.warning(self, tr("login_title", loc),
                                     tr("login_failed", loc, error=exc.detail))
@@ -248,7 +266,8 @@ def run_app() -> int:
             loc = config.language
             client = JarvisApiClient(self.server.text().strip())
             try:
-                client.login(self.user.text().strip(), self.password.text())
+                client.login(self.user.text().strip(), self.password.text(),
+                            **_device_meta(config))
             except ApiError as exc:
                 QMessageBox.warning(self, tr("login_title", loc),
                                     tr("login_failed", loc, error=exc.detail))

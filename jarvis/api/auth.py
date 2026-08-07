@@ -146,6 +146,14 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
     class LoginIn(BaseModel):
         username: str
         password: str
+        # Optional device metadata (Этап 2 / Фаза B1) — a client that sends
+        # them lets the account see *what* is logged in (Device Manager);
+        # one that doesn't (every pre-existing client) behaves exactly as
+        # before, since issue_token() treats them as optional too.
+        device_id: str | None = None
+        device_name: str = ""
+        platform: str = ""
+        client_type: str = ""
 
     class TokenOut(BaseModel):
         token: str
@@ -236,7 +244,9 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
             account = service.create_account(username, body.password)
         except Exception as exc:  # noqa: BLE001 - reported to the caller
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        token = service.issue_token(account.id)
+        token = service.issue_token(
+            account.id, device_id=body.device_id, device_name=body.device_name,
+            platform=body.platform, client_type=body.client_type)
         return TokenOut(token=token,
                         expires_in=settings.auth_token_ttl_hours * 3600)
 
@@ -253,7 +263,9 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
                 status_code=403,
                 detail="Link your Telegram account before signing in.",
             )
-        token = service.issue_token(account.id)
+        token = service.issue_token(
+            account.id, device_id=body.device_id, device_name=body.device_name,
+            platform=body.platform, client_type=body.client_type)
         return TokenOut(token=token, expires_in=settings.auth_token_ttl_hours * 3600)
 
     @router.get("/auth/me", response_model=MeOut)
@@ -328,12 +340,17 @@ def install_auth_routes(app, settings: Settings, service: LicenseService) -> Non
 
     class WebLoginIn(BaseModel):
         code: str
+        device_id: str | None = None
+        device_name: str = ""
+        platform: str = ""
 
     @router.post("/auth/web/session")
     async def open_web_session(body: WebLoginIn, response: Response) -> dict:
         """Exchange a bot-issued code for a browser session cookie."""
         try:
-            result = service.redeem_telegram_login(body.code)
+            result = service.redeem_telegram_login(
+                body.code, device_id=body.device_id, device_name=body.device_name,
+                platform=body.platform, client_type="web")
         except AuthError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         if result is None:

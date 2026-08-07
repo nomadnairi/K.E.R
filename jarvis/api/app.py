@@ -805,6 +805,12 @@ def create_app(engine: JarvisEngine | None = None,
 
     class _TgLoginIn(BaseModel):
         code: str
+        # Optional device metadata (Этап 2 / Фаза B1) — see LoginIn in
+        # jarvis/api/auth.py for the same fields on password login.
+        device_id: str | None = None
+        device_name: str = ""
+        platform: str = ""
+        client_type: str = ""
 
     @app.post("/auth/telegram")
     async def auth_telegram(body: _TgLoginIn) -> dict:
@@ -812,7 +818,9 @@ def create_app(engine: JarvisEngine | None = None,
         if service is None:
             raise HTTPException(status_code=400,
                                 detail="Accounts are not enabled on this server.")
-        result = service.redeem_telegram_login(body.code)
+        result = service.redeem_telegram_login(
+            body.code, device_id=body.device_id, device_name=body.device_name,
+            platform=body.platform, client_type=body.client_type)
         if result is None:
             raise HTTPException(status_code=401,
                                 detail="Invalid or expired code.")

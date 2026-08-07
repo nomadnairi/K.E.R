@@ -71,23 +71,45 @@ class JarvisApiClient:
     def health(self) -> dict:
         return self._request("GET", "/health")
 
-    def login(self, username: str, password: str) -> str:
+    @staticmethod
+    def _device_fields(device_id: str | None, device_name: str,
+                    platform: str, client_type: str) -> dict:
+        """Device metadata for a login body (Этап 2 / Фаза B1).
+
+        Omitted entirely when no ``device_id`` was given, so a caller that
+        doesn't pass one (e.g. an older embedder of this client) sends the
+        exact same body as before this field existed.
+        """
+        if not device_id:
+            return {}
+        return {"device_id": device_id, "device_name": device_name,
+                "platform": platform, "client_type": client_type}
+
+    def login(self, username: str, password: str, *, device_id: str | None = None,
+            device_name: str = "", platform: str = "", client_type: str = "") -> str:
         """Sign in; stores and returns the bearer token."""
-        out = self._request("POST", "/auth/login",
-                            {"username": username, "password": password})
+        body = {"username": username, "password": password,
+                **self._device_fields(device_id, device_name, platform, client_type)}
+        out = self._request("POST", "/auth/login", body)
         self.token = out["token"]
         return self.token
 
-    def register(self, username: str, password: str) -> str:
+    def register(self, username: str, password: str, *, device_id: str | None = None,
+                device_name: str = "", platform: str = "", client_type: str = "") -> str:
         """Create an account and sign in with it; stores the token."""
-        out = self._request("POST", "/auth/register",
-                            {"username": username, "password": password})
+        body = {"username": username, "password": password,
+                **self._device_fields(device_id, device_name, platform, client_type)}
+        out = self._request("POST", "/auth/register", body)
         self.token = out["token"]
         return self.token
 
-    def login_with_telegram_code(self, code: str) -> str:
+    def login_with_telegram_code(self, code: str, *, device_id: str | None = None,
+                                device_name: str = "", platform: str = "",
+                                client_type: str = "") -> str:
         """Sign in with a bot-issued Telegram login code; stores the token."""
-        out = self._request("POST", "/auth/telegram", {"code": code.strip()})
+        body = {"code": code.strip(),
+                **self._device_fields(device_id, device_name, platform, client_type)}
+        out = self._request("POST", "/auth/telegram", body)
         self.token = out["token"]
         return self.token
 

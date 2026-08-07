@@ -274,6 +274,76 @@ def test_a_taken_username_is_a_conflict_not_a_silent_takeover():
                         ).status_code == 200
 
 
+# -- device metadata (Этап 2 / Фаза B1) --------------------------------------
+#
+# LoginIn/_TgLoginIn grew optional device_id/device_name/platform/client_type
+# fields so the account's Device Manager (A4's /dashboard/devices) can show
+# what's actually signed in. These prove both halves: a client that sends
+# nothing behaves exactly as before, and one that does gets it recorded.
+
+
+def test_login_without_device_fields_is_unaffected():
+    """Every pre-existing caller (the bot, old exe builds) sends no device
+    fields at all — the old, bare request body must keep working."""
+    with TestClient(_app()) as client:
+        _seed(client)
+        r = client.post("/auth/login",
+                        json={"username": "tony", "password": "arcreactor"})
+        assert r.status_code == 200, r.text
+
+
+def test_login_with_device_fields_is_recorded_for_the_device_manager():
+    with TestClient(_app()) as client:
+        _seed(client)
+        r = client.post("/auth/login", json={
+            "username": "tony", "password": "arcreactor",
+            "device_id": "desk-1", "device_name": "Tony's PC",
+            "platform": "Windows", "client_type": "desktop",
+        })
+        assert r.status_code == 200, r.text
+
+        svc = client.app.state.license_service
+        acc = svc.get_account("tony")
+        sessions = svc.list_sessions(acc.id)
+        assert len(sessions) == 1
+        assert sessions[0]["device_id"] == "desk-1"
+        assert sessions[0]["device_name"] == "Tony's PC"
+        assert sessions[0]["platform"] == "Windows"
+        assert sessions[0]["client_type"] == "desktop"
+
+
+def test_register_with_device_fields_is_recorded():
+    with TestClient(_app(auth_allow_signup=True)) as client:
+        r = client.post("/auth/register", json={
+            "username": "newbie", "password": "hunter22",
+            "device_id": "phone-9", "platform": "Android",
+            "client_type": "mobile",
+        })
+        assert r.status_code == 200, r.text
+
+        svc = client.app.state.license_service
+        acc = svc.get_account("newbie")
+        sessions = svc.list_sessions(acc.id)
+        assert sessions[0]["device_id"] == "phone-9"
+        assert sessions[0]["client_type"] == "mobile"
+
+
+def test_telegram_login_with_device_fields_is_recorded():
+    with TestClient(_app()) as client:
+        code = client.app.state.license_service.create_telegram_login_code(555)
+        r = client.post("/auth/telegram", json={
+            "code": code, "device_id": "laptop-2", "device_name": "Work laptop",
+            "platform": "Linux", "client_type": "desktop",
+        })
+        assert r.status_code == 200, r.text
+
+        svc = client.app.state.license_service
+        acc = svc.get_account(r.json()["username"])
+        sessions = svc.list_sessions(acc.id)
+        assert sessions[0]["device_id"] == "laptop-2"
+        assert sessions[0]["device_name"] == "Work laptop"
+
+
 # -- the server describes itself --------------------------------------------
 
 def test_the_root_endpoint_says_how_one_gets_in():

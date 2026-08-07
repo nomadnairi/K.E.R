@@ -67,6 +67,11 @@ class AppConfig:
     #: Login token from /auth/login (stored so you stay signed in).
     auth_token: str = ""
     username: str = ""
+    #: Stable per-install identifier (Этап 2 / Фаза B1), generated once via
+    #: uuid4() the first time it's needed and persisted from then on — lets
+    #: the server's Device Manager tell this install apart from any other
+    #: device signed into the same account, across logins and restarts.
+    device_id: str = ""
 
     # -- subscription (cached from the server) --------------------------------
     # Kept on disk so the app still opens, and still knows what it may show,
@@ -166,6 +171,19 @@ class AppConfig:
         except OSError:  # pragma: no cover - platform specific
             pass
         return path
+
+    def ensure_device_id(self) -> str:
+        """Return this install's device id, minting one the first time.
+
+        Called lazily (not in ``__post_init__``) so a freshly-loaded config
+        that never signs in never writes an id it doesn't need — callers that
+        do sign in are expected to ``save()`` afterwards, same as every other
+        field this class mutates on login.
+        """
+        if not self.device_id:
+            import uuid
+            self.device_id = str(uuid.uuid4())
+        return self.device_id
 
     # -- where the engine runs ------------------------------------------------
 
