@@ -154,3 +154,40 @@ def test_the_api_keys_screen_shows_todays_usage():
     assert "apikeys.usage" in html
     assert "usageCard" in html
     assert "Использование сегодня" in html
+
+
+# -- the Device Manager panel (Этап 2 / Фаза A4 backend, B4 UI) -------------
+
+
+def test_the_deck_has_a_devices_screen_between_plan_and_apikeys():
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert 'id="view-devices"' in html
+    assert 'data-view="devices"' in html
+    # Same nav-item/section/load-function convention as every other screen —
+    # not a bespoke pattern (see desktop.html's own audit-derived docstring).
+    for action in ("devices.list", "devices.revoke"):
+        assert action in html
+    assert "loadDevices" in html and "renderDevices" in html
+    # Placed between "plan" and "apikeys" in the rail, as the plan calls for.
+    plan_idx = html.index('data-view="plan"')
+    devices_idx = html.index('data-view="devices"')
+    apikeys_idx = html.index('data-view="apikeys"')
+    assert plan_idx < devices_idx < apikeys_idx
+
+
+def test_devices_screen_is_not_gated_by_a_paid_tier():
+    """Session management is basic account security, not a paid feature —
+    unlike apikeys, it must not appear in the entitlement-lock map."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    lock_map = html.split("PLAN_FEATURE_FOR_VIEW")[1].split("}")[0]
+    assert "devices:" not in lock_map
+
+
+def test_devices_screen_marks_the_current_device_and_confirms_before_self_logout():
+    """Revoking your own live session needs an explicit yes — the same
+    confirm() guard the deck already uses for forgetAll()/settings.reset."""
+    html = DESKTOP.read_text(encoding="utf-8")
+    assert "current_device_id" in html
+    revoke_fn = html.split("async function revokeDevice")[1].split("\n\n")[0]
+    assert "confirm(" in revoke_fn
+    assert "isCurrent" in revoke_fn

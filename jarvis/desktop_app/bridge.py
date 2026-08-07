@@ -335,6 +335,34 @@ class Bridge:
         self.client.revoke_api_key(key_id)
         return {"ok": True, "keys": self.client.list_api_keys()}
 
+    # -- devices (Device Manager — Этап 2 / Фаза A4 backend, B4 UI) -----------
+
+    def _do_devices_list(self, _payload: dict) -> dict:
+        """This account's devices: live desktop-control connections merged
+        with every login session ever issued to it, plus which one is this
+        very install — so the deck can mark it and guard against an
+        accidental self-logout."""
+        if self.client is None:
+            return {"ok": False, "error": "Not signed in."}
+        out = dict(self.client.list_devices())
+        out["ok"] = True
+        out["current_device_id"] = self.config.device_id
+        return out
+
+    def _do_devices_revoke(self, payload: dict) -> dict:
+        """End one of the account's own sessions; it stops working on that
+        device's very next request."""
+        if self.client is None:
+            return {"ok": False, "error": "Not signed in."}
+        session_id = str(payload.get("id", "")).strip()
+        if not session_id:
+            return {"ok": False, "error": "Which session?"}
+        self.client.revoke_device(session_id)
+        out = dict(self.client.list_devices())
+        out["ok"] = True
+        out["current_device_id"] = self.config.device_id
+        return out
+
     # -- MCP servers (Pro: external tool servers) -----------------------------
 
     def _mcp_doc(self) -> dict:

@@ -144,6 +144,18 @@ class JarvisApiClient:
         """Today's proxy token spend vs the tier's ceiling."""
         return self._request("GET", "/v1/usage")
 
+    # -- devices (Device Manager — Этап 2 / Фаза A4 backend, B4 UI) -----------
+
+    def list_devices(self) -> dict:
+        """This account's devices: live desktop-control connections merged
+        with every login session ever issued to it."""
+        return self._request("GET", "/dashboard/devices")
+
+    def revoke_device(self, session_id: str) -> None:
+        """End one of this account's own sessions (a lost phone, an old
+        laptop, ...) — effective on that device's very next request."""
+        self._request("POST", "/dashboard/devices/revoke", {"id": session_id})
+
     def chat(self, message: str, session_id: str = "desktop") -> str:
         out = self._request("POST", "/chat",
                             {"message": message, "session_id": session_id})

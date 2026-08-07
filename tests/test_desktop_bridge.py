@@ -86,6 +86,24 @@ class FakeClient:
         return {"tier": "plus", "used_today": 250, "limit": 1000,
                 "remaining": 750, "unlimited": False}
 
+    # -- devices --------------------------------------------------------------
+
+    def list_devices(self) -> dict:
+        self.calls.append(("list_devices",))
+        sessions = getattr(self, "_sessions", [
+            {"id": "sess-1", "device_id": "dev-1", "device_name": "Laptop",
+            "platform": "Windows", "client_type": "desktop",
+            "created_at": 1.0, "last_seen_at": 2.0, "expires_at": 9e9,
+            "online": True},
+        ])
+        return {"live_devices": getattr(self, "_live_devices", []),
+                "sessions": sessions}
+
+    def revoke_device(self, session_id: str) -> None:
+        self.calls.append(("revoke_device", session_id))
+        self._sessions = [s for s in getattr(self, "_sessions", self.list_devices()["sessions"])
+                        if s["id"] != session_id]
+
 
 class UnreachableClient(FakeClient):
     """A server that answers the login but is gone by the time we ask again."""
@@ -541,6 +559,40 @@ def test_usage_is_unavailable_when_the_server_has_no_proxy(tmp_path):
     # A missing endpoint is "nothing to show", not an error to apologise for.
     assert out["ok"] is True and out["unavailable"] is True
     assert out["usage"] is None
+
+
+# -- devices (Device Manager — Этап 2 / Фаза A4 backend, B4 UI) -------------
+
+
+def test_devices_need_a_signed_in_client(bridge):
+    assert bridge.handle("devices.list")["ok"] is False
+    assert bridge.handle("devices.revoke", {"id": "x"})["ok"] is False
+
+
+def test_devices_list_merges_sessions_and_tags_the_current_device(bridge, tmp_path):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    out = bridge.handle("devices.list")
+    assert out["ok"] is True
+    assert out["sessions"][0]["device_id"] == "dev-1"
+    # This install's own device_id (minted by the login itself) comes back
+    # so the deck can mark "this device" and guard self-logout.
+    assert out["current_device_id"] == bridge.config.device_id
+    assert out["current_device_id"]
+
+
+def test_revoking_a_device_session_removes_it_from_the_list(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    out = bridge.handle("devices.revoke", {"id": "sess-1"})
+    assert out["ok"] is True
+    assert out["sessions"] == []
+
+
+def test_revoking_a_device_without_an_id_is_refused(bridge):
+    bridge.handle("login.password", {"server": "http://localhost:8000",
+                                    "username": "ann", "password": "secret"})
+    assert bridge.handle("devices.revoke", {})["ok"] is False
 
 
 # -- MCP servers ------------------------------------------------------------

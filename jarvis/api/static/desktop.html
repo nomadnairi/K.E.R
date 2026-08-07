@@ -629,6 +629,7 @@
     <div class="grp">Система</div>
     <div class="nav" data-view="settings" onclick="go('settings')" title="Настройки"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3.9a7 7 0 0 0-1.7-1l-.4-2.5h-4l-.4 2.5a7 7 0 0 0-1.7 1L4.1 5 2 8.5 4 10a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.3.9 2-3.4-2-1.5a7 7 0 0 0 .1-1z"/></svg><span>Настройки</span></div>
     <div class="nav" data-view="plan" onclick="go('plan')" title="Тарифы"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9l9-5 9 5-9 5-9-5z"/><path d="M3 15l9 5 9-5M3 12l9 5 9-5"/></svg><span>Тарифы</span></div>
+    <div class="nav" data-view="devices" onclick="go('devices')" title="Устройства"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6"/><rect x="16" y="9" width="6" height="10" rx="1.2"/></svg><span>Устройства</span></div>
     <div class="nav" data-view="apikeys" onclick="go('apikeys')" title="API-ключи"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7 7 5 5 0 0 1 7-7zm0 0L15 8m0 0l3 3 3-3-3-3"/></svg><span>API-ключи</span></div>
     <div class="nav" data-view="logs" onclick="go('logs')" title="Журнал"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h11l5 5v11H4z"/><path d="M8 12h8M8 16h5"/></svg><span>Журнал</span></div>
     <div class="nav" data-view="profile" onclick="go('profile')" title="Профиль"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Профиль</span></div>
@@ -756,6 +757,11 @@
       <div class="spanel" id="planPanel">Загрузка…</div>
     </section>
 
+    <!-- DEVICES (Device Manager — Этап 2 / Фаза A4 backend, B4 UI) -->
+    <section class="view" id="view-devices" hidden>
+      <div class="spanel" id="devicesPanel">Загрузка…</div>
+    </section>
+
     <!-- API KEYS (the credential behind "API от меня") -->
     <section class="view" id="view-apikeys" hidden>
       <div class="spanel" id="apikeysPanel">Загрузка…</div>
@@ -819,8 +825,8 @@
   CFG.api = CFG.api || localStorage.getItem("jarvis.api") || "";
   CFG.key = CFG.key || localStorage.getItem("jarvis.key") || "";
   const $ = id => document.getElementById(id);
-  const TITLE={home:"Главная",chat:"Чат",models:"Модели",memory:"Память",internet:"Интернет",mcp:"MCP серверы",settings:"Настройки",plan:"Тарифы",apikeys:"API-ключи",logs:"Журнал",profile:"Профиль",about:"О системе"};
-  const SUB={home:"Добро пожаловать, сэр",chat:"Диалог с ассистентом",models:"Каталог моделей",memory:"Управление памятью",internet:"Веб-поиск",mcp:"Внешние инструменты (MCP)",settings:"Персонализация",plan:"Подписка и лимиты",apikeys:"Доступ к API от меня",logs:"Что происходило",profile:"Ваш профиль",about:"О системе"};
+  const TITLE={home:"Главная",chat:"Чат",models:"Модели",memory:"Память",internet:"Интернет",mcp:"MCP серверы",settings:"Настройки",plan:"Тарифы",devices:"Устройства",apikeys:"API-ключи",logs:"Журнал",profile:"Профиль",about:"О системе"};
+  const SUB={home:"Добро пожаловать, сэр",chat:"Диалог с ассистентом",models:"Каталог моделей",memory:"Управление памятью",internet:"Веб-поиск",mcp:"Внешние инструменты (MCP)",settings:"Персонализация",plan:"Подписка и лимиты",devices:"Кто и с чего сейчас в аккаунте",apikeys:"Доступ к API от меня",logs:"Что происходило",profile:"Ваш профиль",about:"О системе"};
 
   // ---- the app itself ----------------------------------------------------
   // Served from ker://deck inside KER.exe, so the app answers these requests
@@ -920,6 +926,7 @@
     if(v==="chat") loadSessions(); if(v==="logs") loadLogs();
     if(v==="internet") loadNet(); if(v==="memory") loadMemory();
     if(v==="plan") loadPlanScreen(); if(v==="apikeys") loadApiKeys();
+    if(v==="devices") loadDevices();
     if(v==="mcp") loadMcp();}
 
   function authH(){return CFG.key?{"X-API-Key":CFG.key,"Authorization":"Bearer "+CFG.key}:{};}
@@ -1616,6 +1623,57 @@
       </div></div>`;
   }
   function openBot(){ window.open("https://t.me/jar_v1_s","_blank"); }
+
+  // ---- Devices: Device Manager (Этап 2 / Фаза A4 backend, B4 UI) ---------
+  // Live desktop-control connections (DeviceRegistry) merged server-side
+  // with every login session ever issued to the account
+  // (LicenseService.list_sessions, Фаза A2) — this panel is the first place
+  // either becomes visible to a person, not just to the server's own code.
+  const CLIENT_TYPE_RU={desktop:"Desktop",web:"Веб",mobile:"Мобильный",telegram:"Telegram"};
+  async function loadDevices(){
+    const box=$("devicesPanel"); if(!box) return;
+    if(!NATIVE){box.innerHTML=panelInfo("Устройства","Доступно в приложении KER.");return;}
+    const r=await nat("devices.list");
+    if(!r||!r.ok){box.innerHTML=panelInfo("Устройства",
+      (r&&r.error)||"Не удалось получить список устройств.");return;}
+    renderDevices(r);
+  }
+  function renderDevices(data){
+    const box=$("devicesPanel"); if(!box) return;
+    const sessions=data.sessions||[], live=data.live_devices||[];
+    const liveCaps={};
+    live.forEach(d=>{ if(d.device_id) liveCaps[d.device_id]=d.capabilities||[]; });
+    const when=t=>t?new Date(t*1000).toLocaleString("ru"):"—";
+    const rows=sessions.length?sessions.map(s=>{
+      const isCurrent=!!s.device_id && s.device_id===data.current_device_id;
+      const name=esc(s.device_name||(s.device_id?("Устройство "+s.device_id.slice(0,8)):"Неизвестное устройство"));
+      const kind=esc(CLIENT_TYPE_RU[s.client_type]||s.client_type||"—");
+      const plat=s.platform?(" · "+esc(s.platform)):"";
+      const status=s.online?'<span class="badge up">В СЕТИ</span>'
+        :`<span class="d">последний раз: ${when(s.last_seen_at||s.created_at)}</span>`;
+      const caps=(liveCaps[s.device_id]||[]).length
+        ?`<div class="d">Может: ${esc(liveCaps[s.device_id].join(", "))}</div>`:"";
+      return `<div class="set-row">
+          <div><div class="t">${name}${isCurrent?' <span class="tag pop">это устройство</span>':""}</div>
+            <div class="d">${kind}${plat} · вход ${when(s.created_at)}</div>
+            ${caps}
+            <div style="margin-top:4px">${status}</div></div>
+          <button class="btn" onclick="revokeDevice('${esc(s.id)}',${isCurrent})">Завершить сессию</button></div>`;
+    }).join("") : '<div class="set-row"><div class="d">Ни одного входа пока не было.</div></div>';
+    box.innerHTML = `<div class="card"><header><h3>Устройства и сессии</h3></header><div class="body">
+        ${rows}
+      </div></div>`;
+  }
+  async function revokeDevice(id, isCurrent){
+    if(isCurrent && !confirm(
+      "Это текущее устройство. Завершить сессию? Чтобы продолжить работу, "+
+      "приложение нужно будет перезапустить и войти заново.")) return;
+    const r=await nat("devices.revoke",{id});
+    if(r&&r.ok){
+      if(isCurrent) toast("Сессия завершена — перезапустите приложение, чтобы войти снова");
+      else { renderDevices(r); toast("Сессия завершена"); }
+    } else toast((r&&r.error)||"Не удалось завершить сессию","bad");
+  }
 
   // ---- API keys: the credential behind "API от меня" ---------------------
   // The secret is shown once, at creation — after that only its short prefix

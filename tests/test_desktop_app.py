@@ -149,6 +149,22 @@ def test_register_and_telegram_login_also_send_device_fields():
     assert seen[-1]["code"] == "123456"
 
 
+def test_list_and_revoke_devices_hit_the_right_endpoints():
+    """Этап 2 / Фаза B4 — the Device Manager panel's plumbing."""
+    client = JarvisApiClient("http://example.invalid")
+    calls: list[tuple] = []
+    client._request = lambda method, path, body=None: (  # type: ignore[method-assign]
+        calls.append((method, path, body)),
+        {"live_devices": [], "sessions": []})[1]
+
+    out = client.list_devices()
+    assert calls[-1] == ("GET", "/dashboard/devices", None)
+    assert out == {"live_devices": [], "sessions": []}
+
+    client.revoke_device("sess-1")
+    assert calls[-1] == ("POST", "/dashboard/devices/revoke", {"id": "sess-1"})
+
+
 def test_api_client_against_real_api():
     pytest.importorskip("fastapi")
     import threading
